@@ -15,6 +15,13 @@ true
 
 # ============================================================
 # FROM GEO — (lon=0.0, lat=0.0, res=5)
+#
+# NOTE: (0.0, 0.0) sits on an icosahedron face boundary.
+# DGGRID assigns it to one of the adjacent cells depending on
+# floating-point evaluation order, which differs between x86
+# (80-bit x87 long double) and ARM/macOS (64-bit double).
+# Integer results (seqnum, q2di quad/i/j) are stable; all
+# continuous-coordinate results use fuzzy comparisons.
 # ============================================================
 
 query I
@@ -27,9 +34,8 @@ SELECT geo_to_q2di(0.0, 0.0, 5);
 ----
 {'quad': 3, 'i': 10, 'j': 10}
 
-# geo_to_q2dd yields continuous (floating-point) quad coordinates whose last
-# bits differ between platforms (long double is 80-bit on x86 Linux, 64-bit on
-# macOS/ARM).  Check the integer quad exactly and the floats within 1e-9.
+# geo_to_q2dd: quad is an integer (stable); x and y are continuous
+# coordinates whose last bits differ between x86 and ARM.
 query I
 SELECT (geo_to_q2dd(0.0, 0.0, 5)).quad = 3
    AND abs((geo_to_q2dd(0.0, 0.0, 5)).x - 0.16325419438415284) < 1e-9
@@ -37,9 +43,8 @@ SELECT (geo_to_q2dd(0.0, 0.0, 5)).quad = 3
 ----
 true
 
-# geo_to_projtri at (0,0) lands on the boundary between icosahedron triangles 2
-# and 7.  The assignment is platform-dependent (x86 vs ARM floating-point), so
-# accept either adjacent triangle and check the coordinates to 1e-9.
+# geo_to_projtri: (0,0) lands on the boundary between icosahedron triangles 2
+# and 7.  Accept either adjacent triangle; check coordinates to 1e-9.
 query I
 SELECT
   (((geo_to_projtri(0.0, 0.0, 5)).tnum = 7 AND abs((geo_to_projtri(0.0, 0.0, 5)).x - 0.6734916112035678) < 1e-9)
@@ -54,10 +59,15 @@ SELECT geo_to_geo(0.0, 0.0, 5);
 ----
 {'lon_deg': 0.0, 'lat_deg': 0.0}
 
+# geo_to_plane: (0,0) sits on a plane-triangle boundary; x shifts by exactly
+# 1.0 between platforms.  y is √3 on both platforms — check within 1e-9.
 query I
-SELECT geo_to_plane(0.0, 0.0, 5);
+SELECT
+  (abs((geo_to_plane(0.0, 0.0, 5)).x - 3.326508388796432)   < 1e-9
+   OR abs((geo_to_plane(0.0, 0.0, 5)).x - 2.3265083887607902) < 1e-9)
+  AND abs((geo_to_plane(0.0, 0.0, 5)).y - 1.7320508075851162) < 1e-9;
 ----
-{'x': 3.326508388796432, 'y': 1.7320508075851162}
+true
 
 # ============================================================
 # FROM SEQNUM — (seqnum=2380, res=5)
@@ -68,20 +78,31 @@ SELECT seqnum_to_q2di(2380, 5);
 ----
 {'quad': 3, 'i': 10, 'j': 10}
 
+# seqnum_to_q2dd: x = 5/32 (exact); y is a continuous value that may
+# differ in the last bits across platforms.
 query I
-SELECT seqnum_to_q2dd(2380, 5);
+SELECT (seqnum_to_q2dd(2380, 5)).quad = 3
+   AND (seqnum_to_q2dd(2380, 5)).x = 0.15625
+   AND abs((seqnum_to_q2dd(2380, 5)).y - 0.27063293868263705) < 1e-9;
 ----
-{'quad': 3, 'x': 0.15625, 'y': 0.27063293868263705}
+true
 
+# seqnum_to_projtri: x is very close to 11/16 = 0.6875; y is essentially
+# zero (floating-point noise) — check abs(y) < 1e-9.
 query I
-SELECT seqnum_to_projtri(2380, 5);
+SELECT (seqnum_to_projtri(2380, 5)).tnum = 7
+   AND abs((seqnum_to_projtri(2380, 5)).x - 0.6875) < 1e-9
+   AND abs((seqnum_to_projtri(2380, 5)).y) < 1e-9;
 ----
-{'tnum': 7, 'x': 0.6874999999999999, 'y': -1.4224732503009818e-16}
+true
 
+# seqnum_to_plane: x = 37/16 (exact); y is approximately √3 and may
+# differ in the last bits across platforms.
 query I
-SELECT seqnum_to_plane(2380, 5);
+SELECT (seqnum_to_plane(2380, 5)).x = 2.3125
+   AND abs((seqnum_to_plane(2380, 5)).y - 1.7320508075688774) < 1e-9;
 ----
-{'x': 2.3125, 'y': 1.7320508075688774}
+true
 
 # seqnum_to_seqnum is a round-trip identity
 query I
@@ -103,10 +124,13 @@ SELECT q2di_to_q2di(3, 10, 10, 5);
 ----
 {'quad': 3, 'i': 10, 'j': 10}
 
+# q2di_to_q2dd: same result as seqnum_to_q2dd — same fuzzy check.
 query I
-SELECT q2di_to_q2dd(3, 10, 10, 5);
+SELECT (q2di_to_q2dd(3, 10, 10, 5)).quad = 3
+   AND (q2di_to_q2dd(3, 10, 10, 5)).x = 0.15625
+   AND abs((q2di_to_q2dd(3, 10, 10, 5)).y - 0.27063293868263705) < 1e-9;
 ----
-{'quad': 3, 'x': 0.15625, 'y': 0.27063293868263705}
+true
 
 # ============================================================
 # Round-trips
