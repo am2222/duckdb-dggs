@@ -27,10 +27,15 @@ SELECT geo_to_q2di(0.0, 0.0, 5);
 ----
 {'quad': 3, 'i': 10, 'j': 10}
 
+# geo_to_q2dd yields continuous (floating-point) quad coordinates whose last
+# bits differ between platforms (long double is 80-bit on x86 Linux, 64-bit on
+# macOS/ARM).  Check the integer quad exactly and the floats within 1e-9.
 query I
-SELECT geo_to_q2dd(0.0, 0.0, 5);
+SELECT (geo_to_q2dd(0.0, 0.0, 5)).quad = 3
+   AND abs((geo_to_q2dd(0.0, 0.0, 5)).x - 0.16325419438415284) < 1e-9
+   AND abs((geo_to_q2dd(0.0, 0.0, 5)).y - 0.282764559254556) < 1e-9;
 ----
-{'quad': 3, 'x': 0.16325419438415284, 'y': 0.282764559254556}
+true
 
 query I
 SELECT geo_to_projtri(0.0, 0.0, 5);
