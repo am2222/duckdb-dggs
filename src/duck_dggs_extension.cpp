@@ -14,6 +14,7 @@
 #include "duckdb/common/types/vector.hpp"
 #endif
 #include <duckdb/parser/parsed_data/create_scalar_function_info.hpp>
+#include <dglib/DgBase.h>
 
 namespace duckdb {
 
@@ -202,8 +203,10 @@ static void DggsParamsFun(DataChunk &args, ExpressionState &, Vector &result) {
 // ===========================================================================
 
 static void DuckDggsVersionFun(DataChunk &, ExpressionState &, Vector &result) {
-  auto version = DuckDggsExtension().Version();
-  result.Reference(Value(version.empty() ? "unknown" : version));
+  auto ext_version = DuckDggsExtension().Version();
+  std::string version = (ext_version.empty() ? "unknown" : ext_version);
+  version += " (DGGRID " DGGRID_VERSION ")";
+  result.Reference(Value(version));
 }
 
 // ===========================================================================
