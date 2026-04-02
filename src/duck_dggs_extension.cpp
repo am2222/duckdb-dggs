@@ -17,6 +17,22 @@
 
 namespace duckdb {
 
+// ---------------------------------------------------------------------------
+// Cross-version helper: StructVector::GetEntries returns vector<Vector> in
+// v1.6+ and vector<unique_ptr<Vector>> in v1.5.1.  Both overloads compile;
+// only one will match given the actual return type of GetEntries.
+// ---------------------------------------------------------------------------
+#if __has_include("duckdb/common/vector/struct_vector.hpp")
+static inline Vector &GetStructEntry(vector<Vector> &entries, idx_t i) {
+  return entries[i];
+}
+#else
+static inline Vector &GetStructEntry(vector<unique_ptr<Vector>> &entries,
+                                     idx_t i) {
+  return *entries[i];
+}
+#endif
+
 // ===========================================================================
 // Return type helpers
 // ===========================================================================
@@ -78,36 +94,36 @@ static LogicalType DggsParamsType() {
 
 static void WriteGeo(Vector &result, idx_t i, const dggrid::GeoCoord &c) {
   auto &entries = StructVector::GetEntries(result);
-  FlatVector::GetData<double>(entries[0])[i] = c.lon_deg;
-  FlatVector::GetData<double>(entries[1])[i] = c.lat_deg;
+  FlatVector::GetData<double>(GetStructEntry(entries, 0))[i] = c.lon_deg;
+  FlatVector::GetData<double>(GetStructEntry(entries, 1))[i] = c.lat_deg;
 }
 
 static void WritePlane(Vector &result, idx_t i, const dggrid::PlaneCoord &c) {
   auto &entries = StructVector::GetEntries(result);
-  FlatVector::GetData<double>(entries[0])[i] = c.x;
-  FlatVector::GetData<double>(entries[1])[i] = c.y;
+  FlatVector::GetData<double>(GetStructEntry(entries, 0))[i] = c.x;
+  FlatVector::GetData<double>(GetStructEntry(entries, 1))[i] = c.y;
 }
 
 static void WriteProjTri(Vector &result, idx_t i,
                          const dggrid::ProjTriCoord &c) {
   auto &entries = StructVector::GetEntries(result);
-  FlatVector::GetData<uint64_t>(entries[0])[i] = c.tnum;
-  FlatVector::GetData<double>(entries[1])[i] = c.x;
-  FlatVector::GetData<double>(entries[2])[i] = c.y;
+  FlatVector::GetData<uint64_t>(GetStructEntry(entries, 0))[i] = c.tnum;
+  FlatVector::GetData<double>(GetStructEntry(entries, 1))[i] = c.x;
+  FlatVector::GetData<double>(GetStructEntry(entries, 2))[i] = c.y;
 }
 
 static void WriteQ2DD(Vector &result, idx_t i, const dggrid::Q2DDCoord &c) {
   auto &entries = StructVector::GetEntries(result);
-  FlatVector::GetData<uint64_t>(entries[0])[i] = c.quad;
-  FlatVector::GetData<double>(entries[1])[i] = c.x;
-  FlatVector::GetData<double>(entries[2])[i] = c.y;
+  FlatVector::GetData<uint64_t>(GetStructEntry(entries, 0))[i] = c.quad;
+  FlatVector::GetData<double>(GetStructEntry(entries, 1))[i] = c.x;
+  FlatVector::GetData<double>(GetStructEntry(entries, 2))[i] = c.y;
 }
 
 static void WriteQ2DI(Vector &result, idx_t i, const dggrid::Q2DICoord &c) {
   auto &entries = StructVector::GetEntries(result);
-  FlatVector::GetData<uint64_t>(entries[0])[i] = c.quad;
-  FlatVector::GetData<int64_t>(entries[1])[i] = c.i;
-  FlatVector::GetData<int64_t>(entries[2])[i] = c.j;
+  FlatVector::GetData<uint64_t>(GetStructEntry(entries, 0))[i] = c.quad;
+  FlatVector::GetData<int64_t>(GetStructEntry(entries, 1))[i] = c.i;
+  FlatVector::GetData<int64_t>(GetStructEntry(entries, 2))[i] = c.j;
 }
 
 // ===========================================================================
@@ -136,17 +152,17 @@ struct ParamsReader {
 
   ParamsReader(Vector &params_vec, idx_t count) {
     auto &e = StructVector::GetEntries(params_vec);
-    e[0].ToUnifiedFormat(count, proj_fmt);
+    GetStructEntry(e, 0).ToUnifiedFormat(count, proj_fmt);
     proj_data = UnifiedVectorFormat::GetData<string_t>(proj_fmt);
-    e[1].ToUnifiedFormat(count, apt_fmt);
+    GetStructEntry(e, 1).ToUnifiedFormat(count, apt_fmt);
     apt_data = UnifiedVectorFormat::GetData<int32_t>(apt_fmt);
-    e[2].ToUnifiedFormat(count, topo_fmt);
+    GetStructEntry(e, 2).ToUnifiedFormat(count, topo_fmt);
     topo_data = UnifiedVectorFormat::GetData<string_t>(topo_fmt);
-    e[3].ToUnifiedFormat(count, az_fmt);
+    GetStructEntry(e, 3).ToUnifiedFormat(count, az_fmt);
     az_data = UnifiedVectorFormat::GetData<double>(az_fmt);
-    e[4].ToUnifiedFormat(count, plat_fmt);
+    GetStructEntry(e, 4).ToUnifiedFormat(count, plat_fmt);
     plat_data = UnifiedVectorFormat::GetData<double>(plat_fmt);
-    e[5].ToUnifiedFormat(count, plon_fmt);
+    GetStructEntry(e, 5).ToUnifiedFormat(count, plon_fmt);
     plon_data = UnifiedVectorFormat::GetData<double>(plon_fmt);
   }
 
@@ -177,7 +193,7 @@ static dggrid::DggsParams paramsWithRes(int32_t res) {
 static void DggsParamsFun(DataChunk &args, ExpressionState &, Vector &result) {
   auto &entries = StructVector::GetEntries(result);
   for (idx_t i = 0; i < 6; i++) {
-    entries[i].Reference(args.data[i]);
+    GetStructEntry(entries, i).Reference(args.data[i]);
   }
 }
 
