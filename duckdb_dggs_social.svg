@@ -1,0 +1,272 @@
+<svg width="1280" height="640" viewBox="0 0 1280 640" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <clipPath id="card"><rect width="1280" height="640"/></clipPath>
+  <clipPath id="iconClip"><circle cx="200" cy="320" r="118"/></clipPath>
+</defs>
+
+<!-- ── Background ────────────────────────────────────────────────── -->
+<rect width="1280" height="640" fill="#ffffff"/>
+
+<!-- ── Hex grid — amber/gold, very light on white ─────────────────── -->
+<g clip-path="url(#card)" fill="none" stroke="#E8A000" stroke-width="1.4" opacity="0.18">
+  <!-- Row 0 -->
+  <polygon points="38,-2   76,20   76,64   38,86    0,64    0,20"/>
+  <polygon points="114,-2  152,20  152,64  114,86   76,64   76,20"/>
+  <polygon points="190,-2  228,20  228,64  190,86  152,64  152,20"/>
+  <polygon points="266,-2  304,20  304,64  266,86  228,64  228,20"/>
+  <polygon points="342,-2  380,20  380,64  342,86  304,64  304,20"/>
+  <polygon points="418,-2  456,20  456,64  418,86  380,64  380,20"/>
+  <polygon points="494,-2  532,20  532,64  494,86  456,64  456,20"/>
+  <polygon points="570,-2  608,20  608,64  570,86  532,64  532,20"/>
+  <polygon points="646,-2  684,20  684,64  646,86  608,64  608,20"/>
+  <polygon points="722,-2  760,20  760,64  722,86  684,64  684,20"/>
+  <polygon points="798,-2  836,20  836,64  798,86  760,64  760,20"/>
+  <polygon points="874,-2  912,20  912,64  874,86  836,64  836,20"/>
+  <polygon points="950,-2  988,20  988,64  950,86  912,64  912,20"/>
+  <polygon points="1026,-2 1064,20 1064,64 1026,86  988,64  988,20"/>
+  <polygon points="1102,-2 1140,20 1140,64 1102,86 1064,64 1064,20"/>
+  <polygon points="1178,-2 1216,20 1216,64 1178,86 1140,64 1140,20"/>
+  <polygon points="1254,-2 1292,20 1292,64 1254,86 1216,64 1216,20"/>
+  <!-- Row 1 offset -->
+  <polygon points="76,86   114,108 114,152  76,174   38,152   38,108"/>
+  <polygon points="152,86  190,108 190,152 152,174  114,152  114,108"/>
+  <polygon points="228,86  266,108 266,152 228,174  190,152  190,108"/>
+  <polygon points="304,86  342,108 342,152 304,174  266,152  266,108"/>
+  <polygon points="380,86  418,108 418,152 380,174  342,152  342,108"/>
+  <polygon points="456,86  494,108 494,152 456,174  418,152  418,108"/>
+  <polygon points="532,86  570,108 570,152 532,174  494,152  494,108"/>
+  <polygon points="608,86  646,108 646,152 608,174  570,152  570,108"/>
+  <polygon points="684,86  722,108 722,152 684,174  646,152  646,108"/>
+  <polygon points="760,86  798,108 798,152 760,174  722,152  722,108"/>
+  <polygon points="836,86  874,108 874,152 836,174  798,152  798,108"/>
+  <polygon points="912,86  950,108 950,152 912,174  874,152  874,108"/>
+  <polygon points="988,86  1026,108 1026,152 988,174  950,152  950,108"/>
+  <polygon points="1064,86 1102,108 1102,152 1064,174 1026,152 1026,108"/>
+  <polygon points="1140,86 1178,108 1178,152 1140,174 1102,152 1102,108"/>
+  <polygon points="1216,86 1254,108 1254,152 1216,174 1178,152 1178,108"/>
+  <!-- Row 2 -->
+  <polygon points="38,174   76,196  76,240   38,262   0,240   0,196"/>
+  <polygon points="114,174  152,196 152,240 114,262   76,240   76,196"/>
+  <polygon points="190,174  228,196 228,240 190,262  152,240  152,196"/>
+  <polygon points="266,174  304,196 304,240 266,262  228,240  228,196"/>
+  <polygon points="342,174  380,196 380,240 342,262  304,240  304,196"/>
+  <polygon points="418,174  456,196 456,240 418,262  380,240  380,196"/>
+  <polygon points="494,174  532,196 532,240 494,262  456,240  456,196"/>
+  <polygon points="570,174  608,196 608,240 570,262  532,240  532,196"/>
+  <polygon points="646,174  684,196 684,240 646,262  608,240  608,196"/>
+  <polygon points="722,174  760,196 760,240 722,262  684,240  684,196"/>
+  <polygon points="798,174  836,196 836,240 798,262  760,240  760,196"/>
+  <polygon points="874,174  912,196 912,240 874,262  836,240  836,196"/>
+  <polygon points="950,174  988,196 988,240 950,262  912,240  912,196"/>
+  <polygon points="1026,174 1064,196 1064,240 1026,262  988,240  988,196"/>
+  <polygon points="1102,174 1140,196 1140,240 1102,262 1064,240 1064,196"/>
+  <polygon points="1178,174 1216,196 1216,240 1178,262 1140,240 1140,196"/>
+  <polygon points="1254,174 1292,196 1292,240 1254,262 1216,240 1216,196"/>
+  <!-- Row 3 offset -->
+  <polygon points="76,262   114,284 114,328  76,350   38,328   38,284"/>
+  <polygon points="152,262  190,284 190,328 152,350  114,328  114,284"/>
+  <polygon points="228,262  266,284 266,328 228,350  190,328  190,284"/>
+  <polygon points="304,262  342,284 342,328 304,350  266,328  266,284"/>
+  <polygon points="380,262  418,284 418,328 380,350  342,328  342,284"/>
+  <polygon points="456,262  494,284 494,328 456,350  418,328  418,284"/>
+  <polygon points="532,262  570,284 570,328 532,350  494,328  494,284"/>
+  <polygon points="608,262  646,284 646,328 608,350  570,328  570,284"/>
+  <polygon points="684,262  722,284 722,328 684,350  646,328  646,284"/>
+  <polygon points="760,262  798,284 798,328 760,350  722,328  722,284"/>
+  <polygon points="836,262  874,284 874,328 836,350  798,328  798,284"/>
+  <polygon points="912,262  950,284 950,328 912,350  874,328  874,284"/>
+  <polygon points="988,262  1026,284 1026,328 988,350  950,328  950,284"/>
+  <polygon points="1064,262 1102,284 1102,328 1064,350 1026,328 1026,284"/>
+  <polygon points="1140,262 1178,284 1178,328 1140,350 1102,328 1102,284"/>
+  <polygon points="1216,262 1254,284 1254,328 1216,350 1178,328 1178,284"/>
+  <!-- Row 4 -->
+  <polygon points="38,350   76,372  76,416   38,438   0,416   0,372"/>
+  <polygon points="114,350  152,372 152,416 114,438   76,416   76,372"/>
+  <polygon points="190,350  228,372 228,416 190,438  152,416  152,372"/>
+  <polygon points="266,350  304,372 304,416 266,438  228,416  228,372"/>
+  <polygon points="342,350  380,372 380,416 342,438  304,416  304,372"/>
+  <polygon points="418,350  456,372 456,416 418,438  380,416  380,372"/>
+  <polygon points="494,350  532,372 532,416 494,438  456,416  456,372"/>
+  <polygon points="570,350  608,372 608,416 570,438  532,416  532,372"/>
+  <polygon points="646,350  684,372 684,416 646,438  608,416  608,372"/>
+  <polygon points="722,350  760,372 760,416 722,438  684,416  684,372"/>
+  <polygon points="798,350  836,372 836,416 798,438  760,416  760,372"/>
+  <polygon points="874,350  912,372 912,416 874,438  836,416  836,372"/>
+  <polygon points="950,350  988,372 988,416 950,438  912,416  912,372"/>
+  <polygon points="1026,350 1064,372 1064,416 1026,438  988,416  988,372"/>
+  <polygon points="1102,350 1140,372 1140,416 1102,438 1064,416 1064,372"/>
+  <polygon points="1178,350 1216,372 1216,416 1178,438 1140,416 1140,372"/>
+  <polygon points="1254,350 1292,372 1292,416 1254,438 1216,416 1216,372"/>
+  <!-- Row 5 offset -->
+  <polygon points="76,438   114,460 114,504  76,526   38,504   38,460"/>
+  <polygon points="152,438  190,460 190,504 152,526  114,504  114,460"/>
+  <polygon points="228,438  266,460 266,504 228,526  190,504  190,460"/>
+  <polygon points="304,438  342,460 342,504 304,526  266,504  266,460"/>
+  <polygon points="380,438  418,460 418,504 380,526  342,504  342,460"/>
+  <polygon points="456,438  494,460 494,504 456,526  418,504  418,460"/>
+  <polygon points="532,438  570,460 570,504 532,526  494,504  494,460"/>
+  <polygon points="608,438  646,460 646,504 608,526  570,504  570,460"/>
+  <polygon points="684,438  722,460 722,504 684,526  646,504  646,460"/>
+  <polygon points="760,438  798,460 798,504 760,526  722,504  722,460"/>
+  <polygon points="836,438  874,460 874,504 836,526  798,504  798,460"/>
+  <polygon points="912,438  950,460 950,504 912,526  874,504  874,460"/>
+  <polygon points="988,438  1026,460 1026,504 988,526  950,504  950,460"/>
+  <polygon points="1064,438 1102,460 1102,504 1064,526 1026,504 1026,460"/>
+  <polygon points="1140,438 1178,460 1178,504 1140,526 1102,504 1102,460"/>
+  <polygon points="1216,438 1254,460 1254,504 1216,526 1178,504 1178,460"/>
+  <!-- Row 6 -->
+  <polygon points="38,526   76,548  76,592   38,614   0,592   0,548"/>
+  <polygon points="114,526  152,548 152,592 114,614   76,592   76,548"/>
+  <polygon points="190,526  228,548 228,592 190,614  152,592  152,548"/>
+  <polygon points="266,526  304,548 304,592 266,614  228,592  228,548"/>
+  <polygon points="342,526  380,548 380,592 342,614  304,592  304,548"/>
+  <polygon points="418,526  456,548 456,592 418,614  380,592  380,548"/>
+  <polygon points="494,526  532,548 532,592 494,614  456,592  456,548"/>
+  <polygon points="570,526  608,548 608,592 570,614  532,592  532,548"/>
+  <polygon points="646,526  684,548 684,592 646,614  608,592  608,548"/>
+  <polygon points="722,526  760,548 760,592 722,614  684,592  684,548"/>
+  <polygon points="798,526  836,548 836,592 798,614  760,592  760,548"/>
+  <polygon points="874,526  912,548 912,592 874,614  836,592  836,548"/>
+  <polygon points="950,526  988,548 988,592 950,614  912,592  912,548"/>
+  <polygon points="1026,526 1064,548 1064,592 1026,614  988,592  988,548"/>
+  <polygon points="1102,526 1140,548 1140,592 1102,614 1064,592 1064,548"/>
+  <polygon points="1178,526 1216,548 1216,592 1178,614 1140,592 1140,548"/>
+  <polygon points="1254,526 1292,548 1292,592 1254,614 1216,592 1216,548"/>
+</g>
+
+<!-- Accent-filled hex cells -->
+<polygon fill="#FFC300" fill-opacity="0.1" stroke="#E8A000" stroke-width="1.4" opacity="0.5"
+  points="342,174 380,196 380,240 342,262 304,240 304,196"/>
+<polygon fill="#FFC300" fill-opacity="0.08" stroke="#E8A000" stroke-width="1.4" opacity="0.5"
+  points="950,86 988,108 988,152 950,174 912,152 912,108"/>
+<polygon fill="#FFC300" fill-opacity="0.1" stroke="#E8A000" stroke-width="1.4" opacity="0.5"
+  points="760,350 798,372 798,416 760,438 722,416 722,372"/>
+<polygon fill="#FFC300" fill-opacity="0.08" stroke="#E8A000" stroke-width="1.4" opacity="0.5"
+  points="1064,438 1102,460 1102,504 1064,526 1026,504 1026,460"/>
+<polygon fill="#FFC300" fill-opacity="0.1" stroke="#E8A000" stroke-width="1.4" opacity="0.5"
+  points="190,438 228,460 228,504 190,526 152,504 152,460"/>
+
+<!-- ── Left disc ──────────────────────────────────────────────────── -->
+<circle cx="200" cy="320" r="130" fill="#111827"/>
+<circle cx="200" cy="320" r="125" fill="none" stroke="#2a3a50" stroke-width="1.5"/>
+
+<!-- Hex grid inside disc -->
+<g clip-path="url(#iconClip)" fill="none" stroke="#FFC300" stroke-width="1.4" opacity="0.4">
+  <polygon points="162,230 186,243 186,270 162,284 138,270 138,243"/>
+  <polygon points="210,230 234,243 234,270 210,284 186,270 186,243"/>
+  <polygon points="258,230 282,243 282,270 258,284 234,270 234,243"/>
+  <polygon points="138,270 162,284 162,311 138,324 114,311 114,284"/>
+  <polygon points="186,270 210,284 210,311 186,324 162,311 162,284"/>
+  <polygon points="234,270 258,284 258,311 234,324 210,311 210,284"/>
+  <polygon points="282,270 306,284 306,311 282,324 258,311 258,284"/>
+  <polygon points="162,311 186,324 186,351 162,365 138,351 138,324"/>
+  <polygon points="210,311 234,324 234,351 210,365 186,351 186,324"/>
+  <polygon points="258,311 282,324 282,351 258,365 234,351 234,324"/>
+  <polygon points="138,351 162,365 162,392 138,406 114,392 114,365"/>
+  <polygon points="186,351 210,365 210,392 186,406 162,392 162,365"/>
+  <polygon points="234,351 258,365 258,392 234,406 210,392 210,365"/>
+  <polygon points="282,351 306,365 306,392 282,406 258,392 258,365"/>
+  <polygon points="162,392 186,406 186,433 162,447 138,433 138,406"/>
+  <polygon points="210,392 234,406 234,433 210,447 186,433 186,406"/>
+  <polygon points="258,392 282,406 282,433 258,447 234,433 234,406"/>
+</g>
+
+<!-- Duck eye + beak in disc (scale=0.562, tx=3.3, ty=220.5) -->
+<g transform="translate(3.3, 220.5) scale(0.562)">
+  <path fill="#C85000"
+    d="M474.2,152.2h-32.8v49.5h32.8c13.7,0,24.9-11.3,24.9-24.9S487.9,152.2,474.2,152.2"/>
+  <path fill="#FFC300"
+    d="M280.7,177.1c0,38.2,31.1,69.3,69.3,69.3c38.2,0,69.3-31.1,69.3-69.3
+       s-31.1-69.3-69.3-69.3C311.8,107.8,280.7,138.9,280.7,177.1L280.7,177.1"/>
+  <circle cx="328" cy="156" r="21" fill="white" opacity="0.6"/>
+</g>
+
+<!-- ── Divider ──────────────────────────────────────────────────── -->
+<line x1="370" y1="72" x2="370" y2="568" stroke="#E5E7EB" stroke-width="1.5"/>
+
+<!-- ── Right panel ───────────────────────────────────────────────── -->
+
+<!-- "DuckDB Extension" badge -->
+<rect x="420" y="130" width="198" height="32" rx="4" fill="#FFF8E6"/>
+<rect x="420" y="130" width="198" height="32" rx="4" fill="none" stroke="#E8A000" stroke-width="1.2"/>
+<text x="519" y="152" text-anchor="middle"
+      font-family="'Courier New', Courier, monospace"
+      font-size="13" font-weight="700" letter-spacing="2.5"
+      fill="#A06000">DUCKDB EXTENSION</text>
+
+<!-- Repo name — two lines for visual weight -->
+<text x="420" y="258"
+      font-family="'Courier New', Courier, monospace"
+      font-size="78" font-weight="700" letter-spacing="-2"
+      fill="#111827">duckdb-</text>
+<text x="420" y="346"
+      font-family="'Courier New', Courier, monospace"
+      font-size="78" font-weight="700" letter-spacing="-2"
+      fill="#D08000">dggs</text>
+
+<!-- Description -->
+<text x="420" y="395"
+      font-family="'Helvetica Neue', Arial, sans-serif"
+      font-size="21" font-weight="400"
+      fill="#6B7280">Discrete Global Grid Systems for DuckDB</text>
+<text x="420" y="422"
+      font-family="'Helvetica Neue', Arial, sans-serif"
+      font-size="18" font-weight="400"
+      fill="#9CA3AF">Powered by DGGRID v8 · 30 coordinate transform functions</text>
+
+<!-- Feature tags -->
+<g font-family="'Courier New', Courier, monospace" font-size="13" font-weight="500">
+  <rect x="420" y="450" width="80" height="28" rx="4" fill="#FFF8E6" stroke="#E8C060" stroke-width="1"/>
+  <text x="460" y="469" text-anchor="middle" fill="#92600A">ISEA4H</text>
+
+  <rect x="510" y="450" width="80" height="28" rx="4" fill="#FFF8E6" stroke="#E8C060" stroke-width="1"/>
+  <text x="550" y="469" text-anchor="middle" fill="#92600A">ISEA3H</text>
+
+  <rect x="600" y="450" width="84" height="28" rx="4" fill="#F0F9FF" stroke="#BAE6FD" stroke-width="1"/>
+  <text x="642" y="469" text-anchor="middle" fill="#0369A1">SEQNUM</text>
+
+  <rect x="694" y="450" width="62" height="28" rx="4" fill="#F0F9FF" stroke="#BAE6FD" stroke-width="1"/>
+  <text x="725" y="469" text-anchor="middle" fill="#0369A1">Q2DI</text>
+
+  <rect x="766" y="450" width="56" height="28" rx="4" fill="#F0F9FF" stroke="#BAE6FD" stroke-width="1"/>
+  <text x="794" y="469" text-anchor="middle" fill="#0369A1">Q2DD</text>
+
+  <rect x="832" y="450" width="48" height="28" rx="4" fill="#F5F5F5" stroke="#D1D5DB" stroke-width="1"/>
+  <text x="856" y="469" text-anchor="middle" fill="#4B5563">C++</text>
+</g>
+
+<!-- Bottom rule -->
+<line x1="420" y1="510" x2="1220" y2="510" stroke="#E5E7EB" stroke-width="1"/>
+
+<!-- GitHub path -->
+<text x="420" y="538"
+      font-family="'Courier New', Courier, monospace"
+      font-size="16" fill="#9CA3AF">github.com/</text>
+<text x="566" y="538"
+      font-family="'Courier New', Courier, monospace"
+      font-size="16" fill="#6B7280">am2222</text>
+<text x="652" y="538"
+      font-family="'Courier New', Courier, monospace"
+      font-size="16" fill="#9CA3AF">/</text>
+<text x="664" y="538"
+      font-family="'Courier New', Courier, monospace"
+      font-size="16" fill="#111827">duckdb-dggs</text>
+
+<!-- Top-right corner accent hex + mini duck -->
+<g transform="translate(1110, 48)" opacity="0.5">
+  <polygon fill="none" stroke="#E8A000" stroke-width="1.8"
+    points="55,0 110,32 110,95 55,127 0,95 0,32"/>
+  <polygon fill="#FFF8E6" fill-opacity="0.8" stroke="#E8A000" stroke-width="1.2"
+    points="55,20 96,43 96,89 55,112 14,89 14,43"/>
+  <g transform="translate(18, 28) scale(0.195)">
+    <path fill="#C85000"
+      d="M474.2,152.2h-32.8v49.5h32.8c13.7,0,24.9-11.3,24.9-24.9S487.9,152.2,474.2,152.2"/>
+    <path fill="#E8A000"
+      d="M280.7,177.1c0,38.2,31.1,69.3,69.3,69.3c38.2,0,69.3-31.1,69.3-69.3
+         s-31.1-69.3-69.3-69.3C311.8,107.8,280.7,138.9,280.7,177.1L280.7,177.1"/>
+  </g>
+</g>
+
+<!-- Outer border -->
+<rect x="1" y="1" width="1278" height="638" fill="none" stroke="#E5E7EB" stroke-width="2"/>
+</svg>

@@ -31,6 +31,14 @@ endif()
 option(WITH_GDAL "Build DGGRID with GDAL support" OFF)
 set(DGGRID_SKIP_INSTALL ON CACHE BOOL "" FORCE)
 
+# On Windows, M_PI is not defined by default — not by MSVC and not by MinGW/GCC
+# either (MinGW skips the if(MSVC) block in DGGRID's CMakeLists.txt).
+# add_compile_definitions here is directory-scoped: it propagates into the
+# DGGRID add_subdirectory below, so dglib itself also gets the define.
+if(WIN32)
+    add_compile_definitions(_USE_MATH_DEFINES)
+endif()
+
 add_subdirectory("${DGGRID_DIR}" "third_party/DGGRID" EXCLUDE_FROM_ALL)
 
 set(DGLIB_INCLUDE_DIR "${DGGRID_DIR}/src/lib/dglib/include")
@@ -53,15 +61,6 @@ add_dependencies(${EXTENSION_NAME} dglib)
 add_dependencies(${LOADABLE_EXTENSION_NAME} dglib)
 target_link_libraries(${EXTENSION_NAME} $<TARGET_FILE:dglib>)
 target_link_libraries(${LOADABLE_EXTENSION_NAME} $<TARGET_FILE:dglib>)
-
-# MSVC does not expose M_PI / M_PI_2 etc. unless _USE_MATH_DEFINES is set
-# before including <cmath>.  The DGGRID CMakeLists sets this for its own
-# targets but not for external consumers of dglib headers, so we must add it
-# ourselves for the duck_dggs compilation units.
-if(MSVC)
-    target_compile_definitions(${EXTENSION_NAME} PRIVATE _USE_MATH_DEFINES)
-    target_compile_definitions(${LOADABLE_EXTENSION_NAME} PRIVATE _USE_MATH_DEFINES)
-endif()
 
 # On Linux, the GCC linker (including aarch64) treats duplicate COMDAT symbols
 # (C++17 inline statics like LogicalType::DOUBLE) as hard errors when linking
