@@ -69,7 +69,7 @@ target_link_libraries(${LOADABLE_EXTENSION_NAME} $<TARGET_FILE:dglib>)
 # INTERFACE on the static extension propagates the flag to the final test
 # binary that DuckDB's build system links (libduck_dggs_extension.a +
 # libduckdb_static.a).  PRIVATE on the loadable extension covers the .so link.
-if(UNIX AND NOT APPLE)
+if((UNIX AND NOT APPLE) OR MINGW)
     target_link_options(${EXTENSION_NAME} INTERFACE -Wl,--allow-multiple-definition)
     target_link_options(${LOADABLE_EXTENSION_NAME} PRIVATE -Wl,--allow-multiple-definition)
 endif()
