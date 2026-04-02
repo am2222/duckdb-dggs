@@ -8,7 +8,14 @@
 
 namespace duckdb {
 
+inline void DuckDggsVersionScalarFun(DataChunk &args, ExpressionState &state, Vector &result) {
+	auto version = DuckDggsExtension().Version();
+	result.Reference(Value(version.empty() ? "unknown" : version));
+}
+
 static void LoadInternal(ExtensionLoader &loader) {
+	auto version_fn = ScalarFunction("duck_dggs_version", {}, LogicalType::VARCHAR, DuckDggsVersionScalarFun);
+	loader.RegisterFunction(version_fn);
 }
 
 void DuckDggsExtension::Load(ExtensionLoader &loader) {
