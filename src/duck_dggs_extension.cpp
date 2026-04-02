@@ -53,6 +53,19 @@ static LogicalType Q2DIType() {
 	return LogicalType::STRUCT(c);
 }
 
+// STRUCT(projection VARCHAR, aperture INTEGER, topology VARCHAR,
+//        azimuth_deg DOUBLE, pole_lat_deg DOUBLE, pole_lon_deg DOUBLE)
+static LogicalType DggsParamsType() {
+	child_list_t<LogicalType> c;
+	c.push_back({"projection",   LogicalType::VARCHAR});
+	c.push_back({"aperture",     LogicalType::INTEGER});
+	c.push_back({"topology",     LogicalType::VARCHAR});
+	c.push_back({"azimuth_deg",  LogicalType::DOUBLE});
+	c.push_back({"pole_lat_deg", LogicalType::DOUBLE});
+	c.push_back({"pole_lon_deg", LogicalType::DOUBLE});
+	return LogicalType::STRUCT(c);
+}
+
 // ===========================================================================
 // Output writers — fill struct child vectors from a coord value
 // ===========================================================================
@@ -91,13 +104,9 @@ static void WriteQ2DI(Vector &result, idx_t i, const dggrid::Q2DICoord &c) {
 }
 
 // ===========================================================================
-// Input readers — extract typed values from UnifiedVectorFormat
+// Input readers
 // ===========================================================================
 
-// Wrap args into UnifiedVectorFormat and provide typed getters.
-// Usage:
-//   ArgReader<double> lon(args, 0, count);
-//   double v = lon[i];
 template <typename T>
 struct ArgReader {
 	UnifiedVectorFormat fmt;
@@ -111,14 +120,58 @@ struct ArgReader {
 	T operator[](idx_t i) const { return data[fmt.sel->get_index(i)]; }
 };
 
-// ===========================================================================
-// DggsParams builder from the trailing `res` argument
-// ===========================================================================
+// Reads a DggsParams from a struct vector (one per row).
+// Each child is independently unified so constant structs work correctly.
+struct ParamsReader {
+	UnifiedVectorFormat proj_fmt, apt_fmt, topo_fmt, az_fmt, plat_fmt, plon_fmt;
+	const string_t *proj_data, *topo_data;
+	const int32_t  *apt_data;
+	const double   *az_data, *plat_data, *plon_data;
+
+	ParamsReader(Vector &params_vec, idx_t count) {
+		auto &e = StructVector::GetEntries(params_vec);
+		e[0].ToUnifiedFormat(count, proj_fmt);
+		proj_data  = UnifiedVectorFormat::GetData<string_t>(proj_fmt);
+		e[1].ToUnifiedFormat(count, apt_fmt);
+		apt_data   = UnifiedVectorFormat::GetData<int32_t>(apt_fmt);
+		e[2].ToUnifiedFormat(count, topo_fmt);
+		topo_data  = UnifiedVectorFormat::GetData<string_t>(topo_fmt);
+		e[3].ToUnifiedFormat(count, az_fmt);
+		az_data    = UnifiedVectorFormat::GetData<double>(az_fmt);
+		e[4].ToUnifiedFormat(count, plat_fmt);
+		plat_data  = UnifiedVectorFormat::GetData<double>(plat_fmt);
+		e[5].ToUnifiedFormat(count, plon_fmt);
+		plon_data  = UnifiedVectorFormat::GetData<double>(plon_fmt);
+	}
+
+	dggrid::DggsParams operator[](idx_t i) const {
+		dggrid::DggsParams p;
+		p.projection   = proj_data[proj_fmt.sel->get_index(i)].GetString();
+		p.aperture     = static_cast<unsigned int>(apt_data[apt_fmt.sel->get_index(i)]);
+		p.topology     = topo_data[topo_fmt.sel->get_index(i)].GetString();
+		p.azimuth_deg  = az_data[az_fmt.sel->get_index(i)];
+		p.pole_lat_deg = plat_data[plat_fmt.sel->get_index(i)];
+		p.pole_lon_deg = plon_data[plon_fmt.sel->get_index(i)];
+		return p;
+	}
+};
 
 static dggrid::DggsParams paramsWithRes(int32_t res) {
 	dggrid::DggsParams p;
 	p.res = static_cast<int>(res);
 	return p;
+}
+
+// ===========================================================================
+// dggs_params constructor
+// dggs_params(projection, aperture, topology, azimuth_deg, pole_lat_deg, pole_lon_deg)
+// ===========================================================================
+
+static void DggsParamsFun(DataChunk &args, ExpressionState &, Vector &result) {
+	auto &entries = StructVector::GetEntries(result);
+	for (idx_t i = 0; i < 6; i++) {
+		entries[i].Reference(args.data[i]);
+	}
 }
 
 // ===========================================================================
@@ -131,7 +184,7 @@ static void DuckDggsVersionFun(DataChunk &, ExpressionState &, Vector &result) {
 }
 
 // ===========================================================================
-// FROM GEO  (lon DOUBLE, lat DOUBLE, res INTEGER)
+// FROM GEO  (lon DOUBLE, lat DOUBLE, res INTEGER [, params])
 // ===========================================================================
 
 static void GeoToSeqNumFun(DataChunk &args, ExpressionState &, Vector &result) {
@@ -141,274 +194,322 @@ static void GeoToSeqNumFun(DataChunk &args, ExpressionState &, Vector &result) {
 		    return dggrid::geoToSeqNum(paramsWithRes(res), lon, lat);
 	    });
 }
+static void GeoToSeqNumParamsFun(DataChunk &args, ExpressionState &, Vector &result) {
+	idx_t n = args.size();
+	ArgReader<double> lon(args,0,n), lat(args,1,n); ArgReader<int32_t> res(args,2,n);
+	ParamsReader params(args.data[3], n);
+	auto *out = FlatVector::GetData<uint64_t>(result);
+	for (idx_t i = 0; i < n; i++) { auto p=params[i]; p.res=res[i]; out[i]=dggrid::geoToSeqNum(p,lon[i],lat[i]); }
+}
 
 static void GeoToGeoFun(DataChunk &args, ExpressionState &, Vector &result) {
-	idx_t n = args.size();
-	ArgReader<double>  lon(args, 0, n), lat(args, 1, n);
-	ArgReader<int32_t> res(args, 2, n);
-	for (idx_t i = 0; i < n; i++)
-		WriteGeo(result, i, dggrid::geoToGeo(paramsWithRes(res[i]), lon[i], lat[i]));
+	idx_t n=args.size(); ArgReader<double> lon(args,0,n),lat(args,1,n); ArgReader<int32_t> res(args,2,n);
+	for (idx_t i=0;i<n;i++) WriteGeo(result,i,dggrid::geoToGeo(paramsWithRes(res[i]),lon[i],lat[i]));
+}
+static void GeoToGeoParamsFun(DataChunk &args, ExpressionState &, Vector &result) {
+	idx_t n=args.size(); ArgReader<double> lon(args,0,n),lat(args,1,n); ArgReader<int32_t> res(args,2,n);
+	ParamsReader params(args.data[3],n);
+	for (idx_t i=0;i<n;i++) { auto p=params[i]; p.res=res[i]; WriteGeo(result,i,dggrid::geoToGeo(p,lon[i],lat[i])); }
 }
 
 static void GeoToPlaneFun(DataChunk &args, ExpressionState &, Vector &result) {
-	idx_t n = args.size();
-	ArgReader<double>  lon(args, 0, n), lat(args, 1, n);
-	ArgReader<int32_t> res(args, 2, n);
-	for (idx_t i = 0; i < n; i++)
-		WritePlane(result, i, dggrid::geoToPlane(paramsWithRes(res[i]), lon[i], lat[i]));
+	idx_t n=args.size(); ArgReader<double> lon(args,0,n),lat(args,1,n); ArgReader<int32_t> res(args,2,n);
+	for (idx_t i=0;i<n;i++) WritePlane(result,i,dggrid::geoToPlane(paramsWithRes(res[i]),lon[i],lat[i]));
+}
+static void GeoToPlaneParamsFun(DataChunk &args, ExpressionState &, Vector &result) {
+	idx_t n=args.size(); ArgReader<double> lon(args,0,n),lat(args,1,n); ArgReader<int32_t> res(args,2,n);
+	ParamsReader params(args.data[3],n);
+	for (idx_t i=0;i<n;i++) { auto p=params[i]; p.res=res[i]; WritePlane(result,i,dggrid::geoToPlane(p,lon[i],lat[i])); }
 }
 
 static void GeoToProjTriFun(DataChunk &args, ExpressionState &, Vector &result) {
-	idx_t n = args.size();
-	ArgReader<double>  lon(args, 0, n), lat(args, 1, n);
-	ArgReader<int32_t> res(args, 2, n);
-	for (idx_t i = 0; i < n; i++)
-		WriteProjTri(result, i, dggrid::geoToProjTri(paramsWithRes(res[i]), lon[i], lat[i]));
+	idx_t n=args.size(); ArgReader<double> lon(args,0,n),lat(args,1,n); ArgReader<int32_t> res(args,2,n);
+	for (idx_t i=0;i<n;i++) WriteProjTri(result,i,dggrid::geoToProjTri(paramsWithRes(res[i]),lon[i],lat[i]));
+}
+static void GeoToProjTriParamsFun(DataChunk &args, ExpressionState &, Vector &result) {
+	idx_t n=args.size(); ArgReader<double> lon(args,0,n),lat(args,1,n); ArgReader<int32_t> res(args,2,n);
+	ParamsReader params(args.data[3],n);
+	for (idx_t i=0;i<n;i++) { auto p=params[i]; p.res=res[i]; WriteProjTri(result,i,dggrid::geoToProjTri(p,lon[i],lat[i])); }
 }
 
 static void GeoToQ2DDFun(DataChunk &args, ExpressionState &, Vector &result) {
-	idx_t n = args.size();
-	ArgReader<double>  lon(args, 0, n), lat(args, 1, n);
-	ArgReader<int32_t> res(args, 2, n);
-	for (idx_t i = 0; i < n; i++)
-		WriteQ2DD(result, i, dggrid::geoToQ2DD(paramsWithRes(res[i]), lon[i], lat[i]));
+	idx_t n=args.size(); ArgReader<double> lon(args,0,n),lat(args,1,n); ArgReader<int32_t> res(args,2,n);
+	for (idx_t i=0;i<n;i++) WriteQ2DD(result,i,dggrid::geoToQ2DD(paramsWithRes(res[i]),lon[i],lat[i]));
+}
+static void GeoToQ2DDParamsFun(DataChunk &args, ExpressionState &, Vector &result) {
+	idx_t n=args.size(); ArgReader<double> lon(args,0,n),lat(args,1,n); ArgReader<int32_t> res(args,2,n);
+	ParamsReader params(args.data[3],n);
+	for (idx_t i=0;i<n;i++) { auto p=params[i]; p.res=res[i]; WriteQ2DD(result,i,dggrid::geoToQ2DD(p,lon[i],lat[i])); }
 }
 
 static void GeoToQ2DIFun(DataChunk &args, ExpressionState &, Vector &result) {
-	idx_t n = args.size();
-	ArgReader<double>  lon(args, 0, n), lat(args, 1, n);
-	ArgReader<int32_t> res(args, 2, n);
-	for (idx_t i = 0; i < n; i++)
-		WriteQ2DI(result, i, dggrid::geoToQ2DI(paramsWithRes(res[i]), lon[i], lat[i]));
+	idx_t n=args.size(); ArgReader<double> lon(args,0,n),lat(args,1,n); ArgReader<int32_t> res(args,2,n);
+	for (idx_t i=0;i<n;i++) WriteQ2DI(result,i,dggrid::geoToQ2DI(paramsWithRes(res[i]),lon[i],lat[i]));
+}
+static void GeoToQ2DIParamsFun(DataChunk &args, ExpressionState &, Vector &result) {
+	idx_t n=args.size(); ArgReader<double> lon(args,0,n),lat(args,1,n); ArgReader<int32_t> res(args,2,n);
+	ParamsReader params(args.data[3],n);
+	for (idx_t i=0;i<n;i++) { auto p=params[i]; p.res=res[i]; WriteQ2DI(result,i,dggrid::geoToQ2DI(p,lon[i],lat[i])); }
 }
 
 // ===========================================================================
-// FROM PROJTRI  (tnum UBIGINT, x DOUBLE, y DOUBLE, res INTEGER)
+// FROM PROJTRI  (tnum UBIGINT, x DOUBLE, y DOUBLE, res INTEGER [, params])
 // ===========================================================================
 
 static void ProjTriToGeoFun(DataChunk &args, ExpressionState &, Vector &result) {
-	idx_t n = args.size();
-	ArgReader<uint64_t> tnum(args, 0, n);
-	ArgReader<double>   x(args, 1, n), y(args, 2, n);
-	ArgReader<int32_t>  res(args, 3, n);
-	for (idx_t i = 0; i < n; i++)
-		WriteGeo(result, i, dggrid::projTriToGeo(paramsWithRes(res[i]), tnum[i], x[i], y[i]));
+	idx_t n=args.size(); ArgReader<uint64_t> tnum(args,0,n); ArgReader<double> x(args,1,n),y(args,2,n); ArgReader<int32_t> res(args,3,n);
+	for (idx_t i=0;i<n;i++) WriteGeo(result,i,dggrid::projTriToGeo(paramsWithRes(res[i]),tnum[i],x[i],y[i]));
+}
+static void ProjTriToGeoParamsFun(DataChunk &args, ExpressionState &, Vector &result) {
+	idx_t n=args.size(); ArgReader<uint64_t> tnum(args,0,n); ArgReader<double> x(args,1,n),y(args,2,n); ArgReader<int32_t> res(args,3,n);
+	ParamsReader params(args.data[4],n);
+	for (idx_t i=0;i<n;i++) { auto p=params[i]; p.res=res[i]; WriteGeo(result,i,dggrid::projTriToGeo(p,tnum[i],x[i],y[i])); }
 }
 
 static void ProjTriToPlaneFun(DataChunk &args, ExpressionState &, Vector &result) {
-	idx_t n = args.size();
-	ArgReader<uint64_t> tnum(args, 0, n);
-	ArgReader<double>   x(args, 1, n), y(args, 2, n);
-	ArgReader<int32_t>  res(args, 3, n);
-	for (idx_t i = 0; i < n; i++)
-		WritePlane(result, i, dggrid::projTriToPlane(paramsWithRes(res[i]), tnum[i], x[i], y[i]));
+	idx_t n=args.size(); ArgReader<uint64_t> tnum(args,0,n); ArgReader<double> x(args,1,n),y(args,2,n); ArgReader<int32_t> res(args,3,n);
+	for (idx_t i=0;i<n;i++) WritePlane(result,i,dggrid::projTriToPlane(paramsWithRes(res[i]),tnum[i],x[i],y[i]));
+}
+static void ProjTriToPlaneParamsFun(DataChunk &args, ExpressionState &, Vector &result) {
+	idx_t n=args.size(); ArgReader<uint64_t> tnum(args,0,n); ArgReader<double> x(args,1,n),y(args,2,n); ArgReader<int32_t> res(args,3,n);
+	ParamsReader params(args.data[4],n);
+	for (idx_t i=0;i<n;i++) { auto p=params[i]; p.res=res[i]; WritePlane(result,i,dggrid::projTriToPlane(p,tnum[i],x[i],y[i])); }
 }
 
 static void ProjTriToProjTriFun(DataChunk &args, ExpressionState &, Vector &result) {
-	idx_t n = args.size();
-	ArgReader<uint64_t> tnum(args, 0, n);
-	ArgReader<double>   x(args, 1, n), y(args, 2, n);
-	ArgReader<int32_t>  res(args, 3, n);
-	for (idx_t i = 0; i < n; i++)
-		WriteProjTri(result, i, dggrid::projTriToProjTri(paramsWithRes(res[i]), tnum[i], x[i], y[i]));
+	idx_t n=args.size(); ArgReader<uint64_t> tnum(args,0,n); ArgReader<double> x(args,1,n),y(args,2,n); ArgReader<int32_t> res(args,3,n);
+	for (idx_t i=0;i<n;i++) WriteProjTri(result,i,dggrid::projTriToProjTri(paramsWithRes(res[i]),tnum[i],x[i],y[i]));
+}
+static void ProjTriToProjTriParamsFun(DataChunk &args, ExpressionState &, Vector &result) {
+	idx_t n=args.size(); ArgReader<uint64_t> tnum(args,0,n); ArgReader<double> x(args,1,n),y(args,2,n); ArgReader<int32_t> res(args,3,n);
+	ParamsReader params(args.data[4],n);
+	for (idx_t i=0;i<n;i++) { auto p=params[i]; p.res=res[i]; WriteProjTri(result,i,dggrid::projTriToProjTri(p,tnum[i],x[i],y[i])); }
 }
 
 static void ProjTriToQ2DDFun(DataChunk &args, ExpressionState &, Vector &result) {
-	idx_t n = args.size();
-	ArgReader<uint64_t> tnum(args, 0, n);
-	ArgReader<double>   x(args, 1, n), y(args, 2, n);
-	ArgReader<int32_t>  res(args, 3, n);
-	for (idx_t i = 0; i < n; i++)
-		WriteQ2DD(result, i, dggrid::projTriToQ2DD(paramsWithRes(res[i]), tnum[i], x[i], y[i]));
+	idx_t n=args.size(); ArgReader<uint64_t> tnum(args,0,n); ArgReader<double> x(args,1,n),y(args,2,n); ArgReader<int32_t> res(args,3,n);
+	for (idx_t i=0;i<n;i++) WriteQ2DD(result,i,dggrid::projTriToQ2DD(paramsWithRes(res[i]),tnum[i],x[i],y[i]));
+}
+static void ProjTriToQ2DDParamsFun(DataChunk &args, ExpressionState &, Vector &result) {
+	idx_t n=args.size(); ArgReader<uint64_t> tnum(args,0,n); ArgReader<double> x(args,1,n),y(args,2,n); ArgReader<int32_t> res(args,3,n);
+	ParamsReader params(args.data[4],n);
+	for (idx_t i=0;i<n;i++) { auto p=params[i]; p.res=res[i]; WriteQ2DD(result,i,dggrid::projTriToQ2DD(p,tnum[i],x[i],y[i])); }
 }
 
 static void ProjTriToQ2DIFun(DataChunk &args, ExpressionState &, Vector &result) {
-	idx_t n = args.size();
-	ArgReader<uint64_t> tnum(args, 0, n);
-	ArgReader<double>   x(args, 1, n), y(args, 2, n);
-	ArgReader<int32_t>  res(args, 3, n);
-	for (idx_t i = 0; i < n; i++)
-		WriteQ2DI(result, i, dggrid::projTriToQ2DI(paramsWithRes(res[i]), tnum[i], x[i], y[i]));
+	idx_t n=args.size(); ArgReader<uint64_t> tnum(args,0,n); ArgReader<double> x(args,1,n),y(args,2,n); ArgReader<int32_t> res(args,3,n);
+	for (idx_t i=0;i<n;i++) WriteQ2DI(result,i,dggrid::projTriToQ2DI(paramsWithRes(res[i]),tnum[i],x[i],y[i]));
+}
+static void ProjTriToQ2DIParamsFun(DataChunk &args, ExpressionState &, Vector &result) {
+	idx_t n=args.size(); ArgReader<uint64_t> tnum(args,0,n); ArgReader<double> x(args,1,n),y(args,2,n); ArgReader<int32_t> res(args,3,n);
+	ParamsReader params(args.data[4],n);
+	for (idx_t i=0;i<n;i++) { auto p=params[i]; p.res=res[i]; WriteQ2DI(result,i,dggrid::projTriToQ2DI(p,tnum[i],x[i],y[i])); }
 }
 
 static void ProjTriToSeqNumFun(DataChunk &args, ExpressionState &, Vector &result) {
-	idx_t n = args.size();
-	ArgReader<uint64_t> tnum(args, 0, n);
-	ArgReader<double>   x(args, 1, n), y(args, 2, n);
-	ArgReader<int32_t>  res(args, 3, n);
-	auto *out = FlatVector::GetData<uint64_t>(result);
-	for (idx_t i = 0; i < n; i++)
-		out[i] = dggrid::projTriToSeqNum(paramsWithRes(res[i]), tnum[i], x[i], y[i]);
+	idx_t n=args.size(); ArgReader<uint64_t> tnum(args,0,n); ArgReader<double> x(args,1,n),y(args,2,n); ArgReader<int32_t> res(args,3,n);
+	auto *out=FlatVector::GetData<uint64_t>(result);
+	for (idx_t i=0;i<n;i++) out[i]=dggrid::projTriToSeqNum(paramsWithRes(res[i]),tnum[i],x[i],y[i]);
+}
+static void ProjTriToSeqNumParamsFun(DataChunk &args, ExpressionState &, Vector &result) {
+	idx_t n=args.size(); ArgReader<uint64_t> tnum(args,0,n); ArgReader<double> x(args,1,n),y(args,2,n); ArgReader<int32_t> res(args,3,n);
+	ParamsReader params(args.data[4],n); auto *out=FlatVector::GetData<uint64_t>(result);
+	for (idx_t i=0;i<n;i++) { auto p=params[i]; p.res=res[i]; out[i]=dggrid::projTriToSeqNum(p,tnum[i],x[i],y[i]); }
 }
 
 // ===========================================================================
-// FROM Q2DD  (quad UBIGINT, x DOUBLE, y DOUBLE, res INTEGER)
+// FROM Q2DD  (quad UBIGINT, x DOUBLE, y DOUBLE, res INTEGER [, params])
 // ===========================================================================
 
 static void Q2DDToGeoFun(DataChunk &args, ExpressionState &, Vector &result) {
-	idx_t n = args.size();
-	ArgReader<uint64_t> quad(args, 0, n);
-	ArgReader<double>   x(args, 1, n), y(args, 2, n);
-	ArgReader<int32_t>  res(args, 3, n);
-	for (idx_t i = 0; i < n; i++)
-		WriteGeo(result, i, dggrid::q2DDToGeo(paramsWithRes(res[i]), quad[i], x[i], y[i]));
+	idx_t n=args.size(); ArgReader<uint64_t> quad(args,0,n); ArgReader<double> x(args,1,n),y(args,2,n); ArgReader<int32_t> res(args,3,n);
+	for (idx_t i=0;i<n;i++) WriteGeo(result,i,dggrid::q2DDToGeo(paramsWithRes(res[i]),quad[i],x[i],y[i]));
+}
+static void Q2DDToGeoParamsFun(DataChunk &args, ExpressionState &, Vector &result) {
+	idx_t n=args.size(); ArgReader<uint64_t> quad(args,0,n); ArgReader<double> x(args,1,n),y(args,2,n); ArgReader<int32_t> res(args,3,n);
+	ParamsReader params(args.data[4],n);
+	for (idx_t i=0;i<n;i++) { auto p=params[i]; p.res=res[i]; WriteGeo(result,i,dggrid::q2DDToGeo(p,quad[i],x[i],y[i])); }
 }
 
 static void Q2DDToPlaneFun(DataChunk &args, ExpressionState &, Vector &result) {
-	idx_t n = args.size();
-	ArgReader<uint64_t> quad(args, 0, n);
-	ArgReader<double>   x(args, 1, n), y(args, 2, n);
-	ArgReader<int32_t>  res(args, 3, n);
-	for (idx_t i = 0; i < n; i++)
-		WritePlane(result, i, dggrid::q2DDToPlane(paramsWithRes(res[i]), quad[i], x[i], y[i]));
+	idx_t n=args.size(); ArgReader<uint64_t> quad(args,0,n); ArgReader<double> x(args,1,n),y(args,2,n); ArgReader<int32_t> res(args,3,n);
+	for (idx_t i=0;i<n;i++) WritePlane(result,i,dggrid::q2DDToPlane(paramsWithRes(res[i]),quad[i],x[i],y[i]));
+}
+static void Q2DDToPlaneParamsFun(DataChunk &args, ExpressionState &, Vector &result) {
+	idx_t n=args.size(); ArgReader<uint64_t> quad(args,0,n); ArgReader<double> x(args,1,n),y(args,2,n); ArgReader<int32_t> res(args,3,n);
+	ParamsReader params(args.data[4],n);
+	for (idx_t i=0;i<n;i++) { auto p=params[i]; p.res=res[i]; WritePlane(result,i,dggrid::q2DDToPlane(p,quad[i],x[i],y[i])); }
 }
 
 static void Q2DDToProjTriFun(DataChunk &args, ExpressionState &, Vector &result) {
-	idx_t n = args.size();
-	ArgReader<uint64_t> quad(args, 0, n);
-	ArgReader<double>   x(args, 1, n), y(args, 2, n);
-	ArgReader<int32_t>  res(args, 3, n);
-	for (idx_t i = 0; i < n; i++)
-		WriteProjTri(result, i, dggrid::q2DDToProjTri(paramsWithRes(res[i]), quad[i], x[i], y[i]));
+	idx_t n=args.size(); ArgReader<uint64_t> quad(args,0,n); ArgReader<double> x(args,1,n),y(args,2,n); ArgReader<int32_t> res(args,3,n);
+	for (idx_t i=0;i<n;i++) WriteProjTri(result,i,dggrid::q2DDToProjTri(paramsWithRes(res[i]),quad[i],x[i],y[i]));
+}
+static void Q2DDToProjTriParamsFun(DataChunk &args, ExpressionState &, Vector &result) {
+	idx_t n=args.size(); ArgReader<uint64_t> quad(args,0,n); ArgReader<double> x(args,1,n),y(args,2,n); ArgReader<int32_t> res(args,3,n);
+	ParamsReader params(args.data[4],n);
+	for (idx_t i=0;i<n;i++) { auto p=params[i]; p.res=res[i]; WriteProjTri(result,i,dggrid::q2DDToProjTri(p,quad[i],x[i],y[i])); }
 }
 
 static void Q2DDToQ2DDFun(DataChunk &args, ExpressionState &, Vector &result) {
-	idx_t n = args.size();
-	ArgReader<uint64_t> quad(args, 0, n);
-	ArgReader<double>   x(args, 1, n), y(args, 2, n);
-	ArgReader<int32_t>  res(args, 3, n);
-	for (idx_t i = 0; i < n; i++)
-		WriteQ2DD(result, i, dggrid::q2DDToQ2DD(paramsWithRes(res[i]), quad[i], x[i], y[i]));
+	idx_t n=args.size(); ArgReader<uint64_t> quad(args,0,n); ArgReader<double> x(args,1,n),y(args,2,n); ArgReader<int32_t> res(args,3,n);
+	for (idx_t i=0;i<n;i++) WriteQ2DD(result,i,dggrid::q2DDToQ2DD(paramsWithRes(res[i]),quad[i],x[i],y[i]));
+}
+static void Q2DDToQ2DDParamsFun(DataChunk &args, ExpressionState &, Vector &result) {
+	idx_t n=args.size(); ArgReader<uint64_t> quad(args,0,n); ArgReader<double> x(args,1,n),y(args,2,n); ArgReader<int32_t> res(args,3,n);
+	ParamsReader params(args.data[4],n);
+	for (idx_t i=0;i<n;i++) { auto p=params[i]; p.res=res[i]; WriteQ2DD(result,i,dggrid::q2DDToQ2DD(p,quad[i],x[i],y[i])); }
 }
 
 static void Q2DDToQ2DIFun(DataChunk &args, ExpressionState &, Vector &result) {
-	idx_t n = args.size();
-	ArgReader<uint64_t> quad(args, 0, n);
-	ArgReader<double>   x(args, 1, n), y(args, 2, n);
-	ArgReader<int32_t>  res(args, 3, n);
-	for (idx_t i = 0; i < n; i++)
-		WriteQ2DI(result, i, dggrid::q2DDToQ2DI(paramsWithRes(res[i]), quad[i], x[i], y[i]));
+	idx_t n=args.size(); ArgReader<uint64_t> quad(args,0,n); ArgReader<double> x(args,1,n),y(args,2,n); ArgReader<int32_t> res(args,3,n);
+	for (idx_t i=0;i<n;i++) WriteQ2DI(result,i,dggrid::q2DDToQ2DI(paramsWithRes(res[i]),quad[i],x[i],y[i]));
+}
+static void Q2DDToQ2DIParamsFun(DataChunk &args, ExpressionState &, Vector &result) {
+	idx_t n=args.size(); ArgReader<uint64_t> quad(args,0,n); ArgReader<double> x(args,1,n),y(args,2,n); ArgReader<int32_t> res(args,3,n);
+	ParamsReader params(args.data[4],n);
+	for (idx_t i=0;i<n;i++) { auto p=params[i]; p.res=res[i]; WriteQ2DI(result,i,dggrid::q2DDToQ2DI(p,quad[i],x[i],y[i])); }
 }
 
 static void Q2DDToSeqNumFun(DataChunk &args, ExpressionState &, Vector &result) {
-	idx_t n = args.size();
-	ArgReader<uint64_t> quad(args, 0, n);
-	ArgReader<double>   x(args, 1, n), y(args, 2, n);
-	ArgReader<int32_t>  res(args, 3, n);
-	auto *out = FlatVector::GetData<uint64_t>(result);
-	for (idx_t i = 0; i < n; i++)
-		out[i] = dggrid::q2DDToSeqNum(paramsWithRes(res[i]), quad[i], x[i], y[i]);
+	idx_t n=args.size(); ArgReader<uint64_t> quad(args,0,n); ArgReader<double> x(args,1,n),y(args,2,n); ArgReader<int32_t> res(args,3,n);
+	auto *out=FlatVector::GetData<uint64_t>(result);
+	for (idx_t i=0;i<n;i++) out[i]=dggrid::q2DDToSeqNum(paramsWithRes(res[i]),quad[i],x[i],y[i]);
+}
+static void Q2DDToSeqNumParamsFun(DataChunk &args, ExpressionState &, Vector &result) {
+	idx_t n=args.size(); ArgReader<uint64_t> quad(args,0,n); ArgReader<double> x(args,1,n),y(args,2,n); ArgReader<int32_t> res(args,3,n);
+	ParamsReader params(args.data[4],n); auto *out=FlatVector::GetData<uint64_t>(result);
+	for (idx_t i=0;i<n;i++) { auto p=params[i]; p.res=res[i]; out[i]=dggrid::q2DDToSeqNum(p,quad[i],x[i],y[i]); }
 }
 
 // ===========================================================================
-// FROM Q2DI  (quad UBIGINT, i BIGINT, j BIGINT, res INTEGER)
+// FROM Q2DI  (quad UBIGINT, i BIGINT, j BIGINT, res INTEGER [, params])
 // ===========================================================================
 
 static void Q2DIToGeoFun(DataChunk &args, ExpressionState &, Vector &result) {
-	idx_t n = args.size();
-	ArgReader<uint64_t> quad(args, 0, n);
-	ArgReader<int64_t>  ai(args, 1, n), aj(args, 2, n);
-	ArgReader<int32_t>  res(args, 3, n);
-	for (idx_t i = 0; i < n; i++)
-		WriteGeo(result, i, dggrid::q2DIToGeo(paramsWithRes(res[i]), quad[i], ai[i], aj[i]));
+	idx_t n=args.size(); ArgReader<uint64_t> quad(args,0,n); ArgReader<int64_t> ai(args,1,n),aj(args,2,n); ArgReader<int32_t> res(args,3,n);
+	for (idx_t i=0;i<n;i++) WriteGeo(result,i,dggrid::q2DIToGeo(paramsWithRes(res[i]),quad[i],ai[i],aj[i]));
+}
+static void Q2DIToGeoParamsFun(DataChunk &args, ExpressionState &, Vector &result) {
+	idx_t n=args.size(); ArgReader<uint64_t> quad(args,0,n); ArgReader<int64_t> ai(args,1,n),aj(args,2,n); ArgReader<int32_t> res(args,3,n);
+	ParamsReader params(args.data[4],n);
+	for (idx_t i=0;i<n;i++) { auto p=params[i]; p.res=res[i]; WriteGeo(result,i,dggrid::q2DIToGeo(p,quad[i],ai[i],aj[i])); }
 }
 
 static void Q2DIToPlaneFun(DataChunk &args, ExpressionState &, Vector &result) {
-	idx_t n = args.size();
-	ArgReader<uint64_t> quad(args, 0, n);
-	ArgReader<int64_t>  ai(args, 1, n), aj(args, 2, n);
-	ArgReader<int32_t>  res(args, 3, n);
-	for (idx_t i = 0; i < n; i++)
-		WritePlane(result, i, dggrid::q2DIToPlane(paramsWithRes(res[i]), quad[i], ai[i], aj[i]));
+	idx_t n=args.size(); ArgReader<uint64_t> quad(args,0,n); ArgReader<int64_t> ai(args,1,n),aj(args,2,n); ArgReader<int32_t> res(args,3,n);
+	for (idx_t i=0;i<n;i++) WritePlane(result,i,dggrid::q2DIToPlane(paramsWithRes(res[i]),quad[i],ai[i],aj[i]));
+}
+static void Q2DIToPlaneParamsFun(DataChunk &args, ExpressionState &, Vector &result) {
+	idx_t n=args.size(); ArgReader<uint64_t> quad(args,0,n); ArgReader<int64_t> ai(args,1,n),aj(args,2,n); ArgReader<int32_t> res(args,3,n);
+	ParamsReader params(args.data[4],n);
+	for (idx_t i=0;i<n;i++) { auto p=params[i]; p.res=res[i]; WritePlane(result,i,dggrid::q2DIToPlane(p,quad[i],ai[i],aj[i])); }
 }
 
 static void Q2DIToProjTriFun(DataChunk &args, ExpressionState &, Vector &result) {
-	idx_t n = args.size();
-	ArgReader<uint64_t> quad(args, 0, n);
-	ArgReader<int64_t>  ai(args, 1, n), aj(args, 2, n);
-	ArgReader<int32_t>  res(args, 3, n);
-	for (idx_t i = 0; i < n; i++)
-		WriteProjTri(result, i, dggrid::q2DIToProjTri(paramsWithRes(res[i]), quad[i], ai[i], aj[i]));
+	idx_t n=args.size(); ArgReader<uint64_t> quad(args,0,n); ArgReader<int64_t> ai(args,1,n),aj(args,2,n); ArgReader<int32_t> res(args,3,n);
+	for (idx_t i=0;i<n;i++) WriteProjTri(result,i,dggrid::q2DIToProjTri(paramsWithRes(res[i]),quad[i],ai[i],aj[i]));
+}
+static void Q2DIToProjTriParamsFun(DataChunk &args, ExpressionState &, Vector &result) {
+	idx_t n=args.size(); ArgReader<uint64_t> quad(args,0,n); ArgReader<int64_t> ai(args,1,n),aj(args,2,n); ArgReader<int32_t> res(args,3,n);
+	ParamsReader params(args.data[4],n);
+	for (idx_t i=0;i<n;i++) { auto p=params[i]; p.res=res[i]; WriteProjTri(result,i,dggrid::q2DIToProjTri(p,quad[i],ai[i],aj[i])); }
 }
 
 static void Q2DIToQ2DDFun(DataChunk &args, ExpressionState &, Vector &result) {
-	idx_t n = args.size();
-	ArgReader<uint64_t> quad(args, 0, n);
-	ArgReader<int64_t>  ai(args, 1, n), aj(args, 2, n);
-	ArgReader<int32_t>  res(args, 3, n);
-	for (idx_t i = 0; i < n; i++)
-		WriteQ2DD(result, i, dggrid::q2DIToQ2DD(paramsWithRes(res[i]), quad[i], ai[i], aj[i]));
+	idx_t n=args.size(); ArgReader<uint64_t> quad(args,0,n); ArgReader<int64_t> ai(args,1,n),aj(args,2,n); ArgReader<int32_t> res(args,3,n);
+	for (idx_t i=0;i<n;i++) WriteQ2DD(result,i,dggrid::q2DIToQ2DD(paramsWithRes(res[i]),quad[i],ai[i],aj[i]));
+}
+static void Q2DIToQ2DDParamsFun(DataChunk &args, ExpressionState &, Vector &result) {
+	idx_t n=args.size(); ArgReader<uint64_t> quad(args,0,n); ArgReader<int64_t> ai(args,1,n),aj(args,2,n); ArgReader<int32_t> res(args,3,n);
+	ParamsReader params(args.data[4],n);
+	for (idx_t i=0;i<n;i++) { auto p=params[i]; p.res=res[i]; WriteQ2DD(result,i,dggrid::q2DIToQ2DD(p,quad[i],ai[i],aj[i])); }
 }
 
 static void Q2DIToQ2DIFun(DataChunk &args, ExpressionState &, Vector &result) {
-	idx_t n = args.size();
-	ArgReader<uint64_t> quad(args, 0, n);
-	ArgReader<int64_t>  ai(args, 1, n), aj(args, 2, n);
-	ArgReader<int32_t>  res(args, 3, n);
-	for (idx_t i = 0; i < n; i++)
-		WriteQ2DI(result, i, dggrid::q2DIToQ2DI(paramsWithRes(res[i]), quad[i], ai[i], aj[i]));
+	idx_t n=args.size(); ArgReader<uint64_t> quad(args,0,n); ArgReader<int64_t> ai(args,1,n),aj(args,2,n); ArgReader<int32_t> res(args,3,n);
+	for (idx_t i=0;i<n;i++) WriteQ2DI(result,i,dggrid::q2DIToQ2DI(paramsWithRes(res[i]),quad[i],ai[i],aj[i]));
+}
+static void Q2DIToQ2DIParamsFun(DataChunk &args, ExpressionState &, Vector &result) {
+	idx_t n=args.size(); ArgReader<uint64_t> quad(args,0,n); ArgReader<int64_t> ai(args,1,n),aj(args,2,n); ArgReader<int32_t> res(args,3,n);
+	ParamsReader params(args.data[4],n);
+	for (idx_t i=0;i<n;i++) { auto p=params[i]; p.res=res[i]; WriteQ2DI(result,i,dggrid::q2DIToQ2DI(p,quad[i],ai[i],aj[i])); }
 }
 
 static void Q2DIToSeqNumFun(DataChunk &args, ExpressionState &, Vector &result) {
-	idx_t n = args.size();
-	ArgReader<uint64_t> quad(args, 0, n);
-	ArgReader<int64_t>  ai(args, 1, n), aj(args, 2, n);
-	ArgReader<int32_t>  res(args, 3, n);
-	auto *out = FlatVector::GetData<uint64_t>(result);
-	for (idx_t i = 0; i < n; i++)
-		out[i] = dggrid::q2DIToSeqNum(paramsWithRes(res[i]), quad[i], ai[i], aj[i]);
+	idx_t n=args.size(); ArgReader<uint64_t> quad(args,0,n); ArgReader<int64_t> ai(args,1,n),aj(args,2,n); ArgReader<int32_t> res(args,3,n);
+	auto *out=FlatVector::GetData<uint64_t>(result);
+	for (idx_t i=0;i<n;i++) out[i]=dggrid::q2DIToSeqNum(paramsWithRes(res[i]),quad[i],ai[i],aj[i]);
+}
+static void Q2DIToSeqNumParamsFun(DataChunk &args, ExpressionState &, Vector &result) {
+	idx_t n=args.size(); ArgReader<uint64_t> quad(args,0,n); ArgReader<int64_t> ai(args,1,n),aj(args,2,n); ArgReader<int32_t> res(args,3,n);
+	ParamsReader params(args.data[4],n); auto *out=FlatVector::GetData<uint64_t>(result);
+	for (idx_t i=0;i<n;i++) { auto p=params[i]; p.res=res[i]; out[i]=dggrid::q2DIToSeqNum(p,quad[i],ai[i],aj[i]); }
 }
 
 // ===========================================================================
-// FROM SEQNUM  (seqnum UBIGINT, res INTEGER)
+// FROM SEQNUM  (seqnum UBIGINT, res INTEGER [, params])
 // ===========================================================================
 
 static void SeqNumToGeoFun(DataChunk &args, ExpressionState &, Vector &result) {
-	idx_t n = args.size();
-	ArgReader<uint64_t> seqnum(args, 0, n);
-	ArgReader<int32_t>  res(args, 1, n);
-	for (idx_t i = 0; i < n; i++)
-		WriteGeo(result, i, dggrid::seqNumToGeo(paramsWithRes(res[i]), seqnum[i]));
+	idx_t n=args.size(); ArgReader<uint64_t> seqnum(args,0,n); ArgReader<int32_t> res(args,1,n);
+	for (idx_t i=0;i<n;i++) WriteGeo(result,i,dggrid::seqNumToGeo(paramsWithRes(res[i]),seqnum[i]));
+}
+static void SeqNumToGeoParamsFun(DataChunk &args, ExpressionState &, Vector &result) {
+	idx_t n=args.size(); ArgReader<uint64_t> seqnum(args,0,n); ArgReader<int32_t> res(args,1,n);
+	ParamsReader params(args.data[2],n);
+	for (idx_t i=0;i<n;i++) { auto p=params[i]; p.res=res[i]; WriteGeo(result,i,dggrid::seqNumToGeo(p,seqnum[i])); }
 }
 
 static void SeqNumToPlaneFun(DataChunk &args, ExpressionState &, Vector &result) {
-	idx_t n = args.size();
-	ArgReader<uint64_t> seqnum(args, 0, n);
-	ArgReader<int32_t>  res(args, 1, n);
-	for (idx_t i = 0; i < n; i++)
-		WritePlane(result, i, dggrid::seqNumToPlane(paramsWithRes(res[i]), seqnum[i]));
+	idx_t n=args.size(); ArgReader<uint64_t> seqnum(args,0,n); ArgReader<int32_t> res(args,1,n);
+	for (idx_t i=0;i<n;i++) WritePlane(result,i,dggrid::seqNumToPlane(paramsWithRes(res[i]),seqnum[i]));
+}
+static void SeqNumToPlaneParamsFun(DataChunk &args, ExpressionState &, Vector &result) {
+	idx_t n=args.size(); ArgReader<uint64_t> seqnum(args,0,n); ArgReader<int32_t> res(args,1,n);
+	ParamsReader params(args.data[2],n);
+	for (idx_t i=0;i<n;i++) { auto p=params[i]; p.res=res[i]; WritePlane(result,i,dggrid::seqNumToPlane(p,seqnum[i])); }
 }
 
 static void SeqNumToProjTriFun(DataChunk &args, ExpressionState &, Vector &result) {
-	idx_t n = args.size();
-	ArgReader<uint64_t> seqnum(args, 0, n);
-	ArgReader<int32_t>  res(args, 1, n);
-	for (idx_t i = 0; i < n; i++)
-		WriteProjTri(result, i, dggrid::seqNumToProjTri(paramsWithRes(res[i]), seqnum[i]));
+	idx_t n=args.size(); ArgReader<uint64_t> seqnum(args,0,n); ArgReader<int32_t> res(args,1,n);
+	for (idx_t i=0;i<n;i++) WriteProjTri(result,i,dggrid::seqNumToProjTri(paramsWithRes(res[i]),seqnum[i]));
+}
+static void SeqNumToProjTriParamsFun(DataChunk &args, ExpressionState &, Vector &result) {
+	idx_t n=args.size(); ArgReader<uint64_t> seqnum(args,0,n); ArgReader<int32_t> res(args,1,n);
+	ParamsReader params(args.data[2],n);
+	for (idx_t i=0;i<n;i++) { auto p=params[i]; p.res=res[i]; WriteProjTri(result,i,dggrid::seqNumToProjTri(p,seqnum[i])); }
 }
 
 static void SeqNumToQ2DDFun(DataChunk &args, ExpressionState &, Vector &result) {
-	idx_t n = args.size();
-	ArgReader<uint64_t> seqnum(args, 0, n);
-	ArgReader<int32_t>  res(args, 1, n);
-	for (idx_t i = 0; i < n; i++)
-		WriteQ2DD(result, i, dggrid::seqNumToQ2DD(paramsWithRes(res[i]), seqnum[i]));
+	idx_t n=args.size(); ArgReader<uint64_t> seqnum(args,0,n); ArgReader<int32_t> res(args,1,n);
+	for (idx_t i=0;i<n;i++) WriteQ2DD(result,i,dggrid::seqNumToQ2DD(paramsWithRes(res[i]),seqnum[i]));
+}
+static void SeqNumToQ2DDParamsFun(DataChunk &args, ExpressionState &, Vector &result) {
+	idx_t n=args.size(); ArgReader<uint64_t> seqnum(args,0,n); ArgReader<int32_t> res(args,1,n);
+	ParamsReader params(args.data[2],n);
+	for (idx_t i=0;i<n;i++) { auto p=params[i]; p.res=res[i]; WriteQ2DD(result,i,dggrid::seqNumToQ2DD(p,seqnum[i])); }
 }
 
 static void SeqNumToQ2DIFun(DataChunk &args, ExpressionState &, Vector &result) {
-	idx_t n = args.size();
-	ArgReader<uint64_t> seqnum(args, 0, n);
-	ArgReader<int32_t>  res(args, 1, n);
-	for (idx_t i = 0; i < n; i++)
-		WriteQ2DI(result, i, dggrid::seqNumToQ2DI(paramsWithRes(res[i]), seqnum[i]));
+	idx_t n=args.size(); ArgReader<uint64_t> seqnum(args,0,n); ArgReader<int32_t> res(args,1,n);
+	for (idx_t i=0;i<n;i++) WriteQ2DI(result,i,dggrid::seqNumToQ2DI(paramsWithRes(res[i]),seqnum[i]));
+}
+static void SeqNumToQ2DIParamsFun(DataChunk &args, ExpressionState &, Vector &result) {
+	idx_t n=args.size(); ArgReader<uint64_t> seqnum(args,0,n); ArgReader<int32_t> res(args,1,n);
+	ParamsReader params(args.data[2],n);
+	for (idx_t i=0;i<n;i++) { auto p=params[i]; p.res=res[i]; WriteQ2DI(result,i,dggrid::seqNumToQ2DI(p,seqnum[i])); }
 }
 
 static void SeqNumToSeqNumFun(DataChunk &args, ExpressionState &, Vector &result) {
 	BinaryExecutor::Execute<uint64_t, int32_t, uint64_t>(
 	    args.data[0], args.data[1], result, args.size(),
-	    [](uint64_t seqnum, int32_t res) {
-		    return dggrid::seqNumToSeqNum(paramsWithRes(res), seqnum);
-	    });
+	    [](uint64_t seqnum, int32_t res) { return dggrid::seqNumToSeqNum(paramsWithRes(res), seqnum); });
+}
+static void SeqNumToSeqNumParamsFun(DataChunk &args, ExpressionState &, Vector &result) {
+	idx_t n=args.size(); ArgReader<uint64_t> seqnum(args,0,n); ArgReader<int32_t> res(args,1,n);
+	ParamsReader params(args.data[2],n); auto *out=FlatVector::GetData<uint64_t>(result);
+	for (idx_t i=0;i<n;i++) { auto p=params[i]; p.res=res[i]; out[i]=dggrid::seqNumToSeqNum(p,seqnum[i]); }
 }
 
 // ===========================================================================
@@ -417,6 +518,14 @@ static void SeqNumToSeqNumFun(DataChunk &args, ExpressionState &, Vector &result
 
 static void LoadInternal(ExtensionLoader &loader) {
 	loader.RegisterFunction(ScalarFunction("duck_dggs_version", {}, LogicalType::VARCHAR, DuckDggsVersionFun));
+
+	// ── dggs_params constructor ───────────────────────────────────────────────
+	const auto PARAMS = DggsParamsType();
+	loader.RegisterFunction(ScalarFunction(
+	    "dggs_params",
+	    {LogicalType::VARCHAR, LogicalType::INTEGER, LogicalType::VARCHAR,
+	     LogicalType::DOUBLE,  LogicalType::DOUBLE,  LogicalType::DOUBLE},
+	    PARAMS, DggsParamsFun));
 
 	// ── arg type shorthands ──────────────────────────────────────────────────
 	const auto D  = LogicalType::DOUBLE;
@@ -431,45 +540,59 @@ static void LoadInternal(ExtensionLoader &loader) {
 	const auto Q2DD    = Q2DDType();
 	const auto Q2DI    = Q2DIType();
 
+	// Helper: register two overloads for a function (without and with params)
+	auto reg = [&](const char *name,
+	               vector<LogicalType> base_args,
+	               const LogicalType &ret,
+	               scalar_function_t base_fn,
+	               scalar_function_t params_fn) {
+		ScalarFunctionSet set(name);
+		set.AddFunction(ScalarFunction(name, base_args, ret, std::move(base_fn)));
+		vector<LogicalType> ext_args = base_args;
+		ext_args.push_back(PARAMS);
+		set.AddFunction(ScalarFunction(name, std::move(ext_args), ret, std::move(params_fn)));
+		loader.RegisterFunction(set);
+	};
+
 	// ── FROM GEO ─────────────────────────────────────────────────────────────
-	loader.RegisterFunction(ScalarFunction("geo_to_seqnum",  {D, D, I}, UB,     GeoToSeqNumFun));
-	loader.RegisterFunction(ScalarFunction("geo_to_geo",     {D, D, I}, GEO,    GeoToGeoFun));
-	loader.RegisterFunction(ScalarFunction("geo_to_plane",   {D, D, I}, PLANE,  GeoToPlaneFun));
-	loader.RegisterFunction(ScalarFunction("geo_to_projtri", {D, D, I}, PROJTRI,GeoToProjTriFun));
-	loader.RegisterFunction(ScalarFunction("geo_to_q2dd",    {D, D, I}, Q2DD,   GeoToQ2DDFun));
-	loader.RegisterFunction(ScalarFunction("geo_to_q2di",    {D, D, I}, Q2DI,   GeoToQ2DIFun));
+	reg("geo_to_seqnum",  {D,D,I}, UB,     GeoToSeqNumFun,     GeoToSeqNumParamsFun);
+	reg("geo_to_geo",     {D,D,I}, GEO,    GeoToGeoFun,        GeoToGeoParamsFun);
+	reg("geo_to_plane",   {D,D,I}, PLANE,  GeoToPlaneFun,      GeoToPlaneParamsFun);
+	reg("geo_to_projtri", {D,D,I}, PROJTRI,GeoToProjTriFun,    GeoToProjTriParamsFun);
+	reg("geo_to_q2dd",    {D,D,I}, Q2DD,   GeoToQ2DDFun,       GeoToQ2DDParamsFun);
+	reg("geo_to_q2di",    {D,D,I}, Q2DI,   GeoToQ2DIFun,       GeoToQ2DIParamsFun);
 
 	// ── FROM PROJTRI ──────────────────────────────────────────────────────────
-	loader.RegisterFunction(ScalarFunction("projtri_to_geo",     {UB, D, D, I}, GEO,    ProjTriToGeoFun));
-	loader.RegisterFunction(ScalarFunction("projtri_to_plane",   {UB, D, D, I}, PLANE,  ProjTriToPlaneFun));
-	loader.RegisterFunction(ScalarFunction("projtri_to_projtri", {UB, D, D, I}, PROJTRI,ProjTriToProjTriFun));
-	loader.RegisterFunction(ScalarFunction("projtri_to_q2dd",    {UB, D, D, I}, Q2DD,   ProjTriToQ2DDFun));
-	loader.RegisterFunction(ScalarFunction("projtri_to_q2di",    {UB, D, D, I}, Q2DI,   ProjTriToQ2DIFun));
-	loader.RegisterFunction(ScalarFunction("projtri_to_seqnum",  {UB, D, D, I}, UB,     ProjTriToSeqNumFun));
+	reg("projtri_to_geo",     {UB,D,D,I}, GEO,    ProjTriToGeoFun,     ProjTriToGeoParamsFun);
+	reg("projtri_to_plane",   {UB,D,D,I}, PLANE,  ProjTriToPlaneFun,   ProjTriToPlaneParamsFun);
+	reg("projtri_to_projtri", {UB,D,D,I}, PROJTRI,ProjTriToProjTriFun, ProjTriToProjTriParamsFun);
+	reg("projtri_to_q2dd",    {UB,D,D,I}, Q2DD,   ProjTriToQ2DDFun,    ProjTriToQ2DDParamsFun);
+	reg("projtri_to_q2di",    {UB,D,D,I}, Q2DI,   ProjTriToQ2DIFun,    ProjTriToQ2DIParamsFun);
+	reg("projtri_to_seqnum",  {UB,D,D,I}, UB,     ProjTriToSeqNumFun,  ProjTriToSeqNumParamsFun);
 
 	// ── FROM Q2DD ─────────────────────────────────────────────────────────────
-	loader.RegisterFunction(ScalarFunction("q2dd_to_geo",     {UB, D, D, I}, GEO,    Q2DDToGeoFun));
-	loader.RegisterFunction(ScalarFunction("q2dd_to_plane",   {UB, D, D, I}, PLANE,  Q2DDToPlaneFun));
-	loader.RegisterFunction(ScalarFunction("q2dd_to_projtri", {UB, D, D, I}, PROJTRI,Q2DDToProjTriFun));
-	loader.RegisterFunction(ScalarFunction("q2dd_to_q2dd",    {UB, D, D, I}, Q2DD,   Q2DDToQ2DDFun));
-	loader.RegisterFunction(ScalarFunction("q2dd_to_q2di",    {UB, D, D, I}, Q2DI,   Q2DDToQ2DIFun));
-	loader.RegisterFunction(ScalarFunction("q2dd_to_seqnum",  {UB, D, D, I}, UB,     Q2DDToSeqNumFun));
+	reg("q2dd_to_geo",     {UB,D,D,I}, GEO,    Q2DDToGeoFun,     Q2DDToGeoParamsFun);
+	reg("q2dd_to_plane",   {UB,D,D,I}, PLANE,  Q2DDToPlaneFun,   Q2DDToPlaneParamsFun);
+	reg("q2dd_to_projtri", {UB,D,D,I}, PROJTRI,Q2DDToProjTriFun, Q2DDToProjTriParamsFun);
+	reg("q2dd_to_q2dd",    {UB,D,D,I}, Q2DD,   Q2DDToQ2DDFun,    Q2DDToQ2DDParamsFun);
+	reg("q2dd_to_q2di",    {UB,D,D,I}, Q2DI,   Q2DDToQ2DIFun,    Q2DDToQ2DIParamsFun);
+	reg("q2dd_to_seqnum",  {UB,D,D,I}, UB,     Q2DDToSeqNumFun,  Q2DDToSeqNumParamsFun);
 
 	// ── FROM Q2DI ─────────────────────────────────────────────────────────────
-	loader.RegisterFunction(ScalarFunction("q2di_to_geo",     {UB, B, B, I}, GEO,    Q2DIToGeoFun));
-	loader.RegisterFunction(ScalarFunction("q2di_to_plane",   {UB, B, B, I}, PLANE,  Q2DIToPlaneFun));
-	loader.RegisterFunction(ScalarFunction("q2di_to_projtri", {UB, B, B, I}, PROJTRI,Q2DIToProjTriFun));
-	loader.RegisterFunction(ScalarFunction("q2di_to_q2dd",    {UB, B, B, I}, Q2DD,   Q2DIToQ2DDFun));
-	loader.RegisterFunction(ScalarFunction("q2di_to_q2di",    {UB, B, B, I}, Q2DI,   Q2DIToQ2DIFun));
-	loader.RegisterFunction(ScalarFunction("q2di_to_seqnum",  {UB, B, B, I}, UB,     Q2DIToSeqNumFun));
+	reg("q2di_to_geo",     {UB,B,B,I}, GEO,    Q2DIToGeoFun,     Q2DIToGeoParamsFun);
+	reg("q2di_to_plane",   {UB,B,B,I}, PLANE,  Q2DIToPlaneFun,   Q2DIToPlaneParamsFun);
+	reg("q2di_to_projtri", {UB,B,B,I}, PROJTRI,Q2DIToProjTriFun, Q2DIToProjTriParamsFun);
+	reg("q2di_to_q2dd",    {UB,B,B,I}, Q2DD,   Q2DIToQ2DDFun,    Q2DIToQ2DDParamsFun);
+	reg("q2di_to_q2di",    {UB,B,B,I}, Q2DI,   Q2DIToQ2DIFun,    Q2DIToQ2DIParamsFun);
+	reg("q2di_to_seqnum",  {UB,B,B,I}, UB,     Q2DIToSeqNumFun,  Q2DIToSeqNumParamsFun);
 
 	// ── FROM SEQNUM ───────────────────────────────────────────────────────────
-	loader.RegisterFunction(ScalarFunction("seqnum_to_geo",     {UB, I}, GEO,    SeqNumToGeoFun));
-	loader.RegisterFunction(ScalarFunction("seqnum_to_plane",   {UB, I}, PLANE,  SeqNumToPlaneFun));
-	loader.RegisterFunction(ScalarFunction("seqnum_to_projtri", {UB, I}, PROJTRI,SeqNumToProjTriFun));
-	loader.RegisterFunction(ScalarFunction("seqnum_to_q2dd",    {UB, I}, Q2DD,   SeqNumToQ2DDFun));
-	loader.RegisterFunction(ScalarFunction("seqnum_to_q2di",    {UB, I}, Q2DI,   SeqNumToQ2DIFun));
-	loader.RegisterFunction(ScalarFunction("seqnum_to_seqnum",  {UB, I}, UB,     SeqNumToSeqNumFun));
+	reg("seqnum_to_geo",     {UB,I}, GEO,    SeqNumToGeoFun,     SeqNumToGeoParamsFun);
+	reg("seqnum_to_plane",   {UB,I}, PLANE,  SeqNumToPlaneFun,   SeqNumToPlaneParamsFun);
+	reg("seqnum_to_projtri", {UB,I}, PROJTRI,SeqNumToProjTriFun, SeqNumToProjTriParamsFun);
+	reg("seqnum_to_q2dd",    {UB,I}, Q2DD,   SeqNumToQ2DDFun,    SeqNumToQ2DDParamsFun);
+	reg("seqnum_to_q2di",    {UB,I}, Q2DI,   SeqNumToQ2DIFun,    SeqNumToQ2DIParamsFun);
+	reg("seqnum_to_seqnum",  {UB,I}, UB,     SeqNumToSeqNumFun,  SeqNumToSeqNumParamsFun);
 }
 
 void DuckDggsExtension::Load(ExtensionLoader &loader) { LoadInternal(loader); }
