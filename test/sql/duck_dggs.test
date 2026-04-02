@@ -2,5 +2,136 @@
 # description: test duck_dggs extension
 # group: [sql]
 
-# Require statement will ensure this test is run with this extension loaded
 require duck_dggs
+
+# ============================================================
+# Utility
+# ============================================================
+
+query I
+SELECT duck_dggs_version() != '';
+----
+true
+
+# ============================================================
+# FROM GEO — (lon=0.0, lat=0.0, res=5)
+# ============================================================
+
+query I
+SELECT geo_to_seqnum(0.0, 0.0, 5);
+----
+2380
+
+query I
+SELECT geo_to_q2di(0.0, 0.0, 5);
+----
+{'quad': 3, 'i': 10, 'j': 10}
+
+query I
+SELECT geo_to_q2dd(0.0, 0.0, 5);
+----
+{'quad': 3, 'x': 0.16325419438415284, 'y': 0.282764559254556}
+
+query I
+SELECT geo_to_projtri(0.0, 0.0, 5);
+----
+{'tnum': 7, 'x': 0.6734916112035678, 'y': -1.6238500936416828e-11}
+
+query I
+SELECT geo_to_geo(0.0, 0.0, 5);
+----
+{'lon_deg': 0.0, 'lat_deg': 0.0}
+
+query I
+SELECT geo_to_plane(0.0, 0.0, 5);
+----
+{'x': 3.326508388796432, 'y': 1.7320508075851162}
+
+# ============================================================
+# FROM SEQNUM — (seqnum=2380, res=5)
+# ============================================================
+
+query I
+SELECT seqnum_to_q2di(2380, 5);
+----
+{'quad': 3, 'i': 10, 'j': 10}
+
+query I
+SELECT seqnum_to_q2dd(2380, 5);
+----
+{'quad': 3, 'x': 0.15625, 'y': 0.27063293868263705}
+
+query I
+SELECT seqnum_to_projtri(2380, 5);
+----
+{'tnum': 7, 'x': 0.6874999999999999, 'y': -1.4224732503009818e-16}
+
+query I
+SELECT seqnum_to_plane(2380, 5);
+----
+{'x': 2.3125, 'y': 1.7320508075688774}
+
+# seqnum_to_seqnum is a round-trip identity
+query I
+SELECT seqnum_to_seqnum(2380, 5);
+----
+2380
+
+# ============================================================
+# FROM Q2DI — (quad=3, i=10, j=10, res=5)
+# ============================================================
+
+query I
+SELECT q2di_to_seqnum(3, 10, 10, 5);
+----
+2380
+
+query I
+SELECT q2di_to_q2di(3, 10, 10, 5);
+----
+{'quad': 3, 'i': 10, 'j': 10}
+
+query I
+SELECT q2di_to_q2dd(3, 10, 10, 5);
+----
+{'quad': 3, 'x': 0.15625, 'y': 0.27063293868263705}
+
+# ============================================================
+# Round-trips
+# ============================================================
+
+# geo → seqnum → geo → seqnum must be stable (cell centre)
+query I
+SELECT geo_to_seqnum((seqnum_to_geo(2380, 5)).lon_deg, (seqnum_to_geo(2380, 5)).lat_deg, 5);
+----
+2380
+
+# q2di → seqnum → q2di must be stable
+query I
+SELECT seqnum_to_q2di(q2di_to_seqnum(3, 10, 10, 5), 5);
+----
+{'quad': 3, 'i': 10, 'j': 10}
+
+# seqnum → q2di → seqnum must be stable
+query I
+SELECT q2di_to_seqnum((seqnum_to_q2di(2380, 5)).quad, (seqnum_to_q2di(2380, 5)).i, (seqnum_to_q2di(2380, 5)).j, 5);
+----
+2380
+
+# ============================================================
+# Vectorised — works on a table of values
+# ============================================================
+
+query I
+SELECT count(*) = 3 FROM (
+    SELECT geo_to_seqnum(lon, lat, 5)
+    FROM (VALUES (0.0, 0.0), (10.0, 20.0), (-45.0, 60.0)) t(lon, lat)
+);
+----
+true
+
+# Different resolutions produce different cell counts
+query I
+SELECT geo_to_seqnum(0.0, 0.0, 1) != geo_to_seqnum(0.0, 0.0, 5);
+----
+true

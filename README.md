@@ -1,102 +1,135 @@
-# DuckDggs
+# duck_dggs
 
-This repository is based on https://github.com/duckdb/extension-template, check it out if you want to build and ship your own DuckDB extension.
+A DuckDB extension for discrete global grid systems (DGGS) using [DGGRID v8](https://github.com/sahrk/DGGRID). Provides coordinate transforms between geographic coordinates and ISEA grid cell identifiers across multiple reference frames.
+
+## Building
+
+```sh
+git submodule update --init --recursive
+GEN=ninja make
+```
+
+For faster incremental builds, install `ccache` and `ninja`:
+```sh
+brew install ccache ninja
+```
+
+The main binaries produced:
+- `./build/release/duckdb` — DuckDB shell with the extension loaded
+- `./build/release/extension/duck_dggs/duck_dggs.duckdb_extension` — distributable binary
+
+## Usage
+
+```sh
+./build/release/duckdb
+```
+
+```sql
+-- lon, lat → cell ID at resolution 5
+SELECT geo_to_seqnum(0.0, 0.0, 5);
+-- → 2380
+
+-- cell ID → cell centre (lon, lat)
+SELECT seqnum_to_geo(2380, 5);
+-- → {'lon_deg': -0.902, 'lat_deg': ~0.0}
+
+-- unpack struct fields
+SELECT r.lon_deg, r.lat_deg
+FROM (SELECT seqnum_to_geo(2380, 5) AS r);
+```
+
+## Functions
+
+All functions use the **ISEA4H** grid by default (ISEA projection, aperture 4, hexagon topology). The `res` parameter controls resolution (0–30).
+
+### Coordinate types
+
+| Type | Fields | Description |
+|------|--------|-------------|
+| `UBIGINT` | — | Sequence number — linear cell index |
+| `STRUCT(lon_deg, lat_deg)` | `DOUBLE, DOUBLE` | Geographic coordinates (degrees) |
+| `STRUCT(x, y)` | `DOUBLE, DOUBLE` | Plane coordinates |
+| `STRUCT(tnum, x, y)` | `UBIGINT, DOUBLE, DOUBLE` | Projected triangle coordinates |
+| `STRUCT(quad, x, y)` | `UBIGINT, DOUBLE, DOUBLE` | Quad (Q2DD) coordinates |
+| `STRUCT(quad, i, j)` | `UBIGINT, BIGINT, BIGINT` | Discrete quad (Q2DI) coordinates |
 
 ---
 
-This extension, DuckDggs, allow you to ... <extension_goal>.
+### Utility
 
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `duck_dggs_version()` | `VARCHAR` | Extension version string |
 
-## Building
-### Managing dependencies
-DuckDB extensions uses VCPKG for dependency management. Enabling VCPKG is very simple: follow the [installation instructions](https://vcpkg.io/en/getting-started) or just run the following:
-```shell
-git clone https://github.com/Microsoft/vcpkg.git
-./vcpkg/bootstrap-vcpkg.sh
-export VCPKG_TOOLCHAIN_PATH=`pwd`/vcpkg/scripts/buildsystems/vcpkg.cmake
-```
-Note: VCPKG is only required for extensions that want to rely on it for dependency management. If you want to develop an extension without dependencies, or want to do your own dependency management, just skip this step. Note that the example extension uses VCPKG to build with a dependency for instructive purposes, so when skipping this step the build may not work without removing the dependency.
+---
 
-### Build steps
-Now to build the extension, run:
-```sh
-make
-```
-The main binaries that will be built are:
-```sh
-./build/release/duckdb
-./build/release/test/unittest
-./build/release/extension/duck_dggs/duck_dggs.duckdb_extension
-```
-- `duckdb` is the binary for the duckdb shell with the extension code automatically loaded.
-- `unittest` is the test runner of duckdb. Again, the extension is already linked into the binary.
-- `duck_dggs.duckdb_extension` is the loadable binary as it would be distributed.
+### From geographic coordinates `(lon DOUBLE, lat DOUBLE, res INTEGER)`
 
-## Running the extension
-To run the extension code, simply start the shell with `./build/release/duckdb`.
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `geo_to_seqnum(lon, lat, res)` | `UBIGINT` | Cell sequence number containing the point |
+| `geo_to_geo(lon, lat, res)` | `STRUCT(lon_deg, lat_deg)` | Cell centre in geographic coords |
+| `geo_to_plane(lon, lat, res)` | `STRUCT(x, y)` | Cell centre in plane coords |
+| `geo_to_projtri(lon, lat, res)` | `STRUCT(tnum, x, y)` | Cell centre in projected triangle coords |
+| `geo_to_q2dd(lon, lat, res)` | `STRUCT(quad, x, y)` | Cell centre in Q2DD coords |
+| `geo_to_q2di(lon, lat, res)` | `STRUCT(quad, i, j)` | Cell index in Q2DI coords |
 
-Now we can use the features from the extension directly in DuckDB. The template contains a single scalar function `duck_dggs()` that takes a string arguments and returns a string:
-```
-D select duck_dggs('Jane') as result;
-┌───────────────┐
-│    result     │
-│    varchar    │
-├───────────────┤
-│ DuckDggs Jane 🐥 │
-└───────────────┘
-```
+---
 
-## Running the tests
-Different tests can be created for DuckDB extensions. The primary way of testing DuckDB extensions should be the SQL tests in `./test/sql`. These SQL tests can be run using:
+### From sequence number `(seqnum UBIGINT, res INTEGER)`
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `seqnum_to_geo(seqnum, res)` | `STRUCT(lon_deg, lat_deg)` | Cell centre in geographic coords |
+| `seqnum_to_plane(seqnum, res)` | `STRUCT(x, y)` | Cell centre in plane coords |
+| `seqnum_to_projtri(seqnum, res)` | `STRUCT(tnum, x, y)` | Cell centre in projected triangle coords |
+| `seqnum_to_q2dd(seqnum, res)` | `STRUCT(quad, x, y)` | Cell centre in Q2DD coords |
+| `seqnum_to_q2di(seqnum, res)` | `STRUCT(quad, i, j)` | Cell index in Q2DI coords |
+| `seqnum_to_seqnum(seqnum, res)` | `UBIGINT` | Round-trip validation — normalises the cell ID |
+
+---
+
+### From Q2DI `(quad UBIGINT, i BIGINT, j BIGINT, res INTEGER)`
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `q2di_to_geo(quad, i, j, res)` | `STRUCT(lon_deg, lat_deg)` | Cell centre in geographic coords |
+| `q2di_to_plane(quad, i, j, res)` | `STRUCT(x, y)` | Cell centre in plane coords |
+| `q2di_to_projtri(quad, i, j, res)` | `STRUCT(tnum, x, y)` | Cell centre in projected triangle coords |
+| `q2di_to_q2dd(quad, i, j, res)` | `STRUCT(quad, x, y)` | Cell centre in Q2DD coords |
+| `q2di_to_q2di(quad, i, j, res)` | `STRUCT(quad, i, j)` | Round-trip validation |
+| `q2di_to_seqnum(quad, i, j, res)` | `UBIGINT` | Cell sequence number |
+
+---
+
+### From Q2DD `(quad UBIGINT, x DOUBLE, y DOUBLE, res INTEGER)`
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `q2dd_to_geo(quad, x, y, res)` | `STRUCT(lon_deg, lat_deg)` | Cell centre in geographic coords |
+| `q2dd_to_plane(quad, x, y, res)` | `STRUCT(x, y)` | Cell centre in plane coords |
+| `q2dd_to_projtri(quad, x, y, res)` | `STRUCT(tnum, x, y)` | Cell centre in projected triangle coords |
+| `q2dd_to_q2dd(quad, x, y, res)` | `STRUCT(quad, x, y)` | Round-trip validation |
+| `q2dd_to_q2di(quad, x, y, res)` | `STRUCT(quad, i, j)` | Cell index in Q2DI coords |
+| `q2dd_to_seqnum(quad, x, y, res)` | `UBIGINT` | Cell sequence number |
+
+---
+
+### From projected triangle `(tnum UBIGINT, x DOUBLE, y DOUBLE, res INTEGER)`
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `projtri_to_geo(tnum, x, y, res)` | `STRUCT(lon_deg, lat_deg)` | Cell centre in geographic coords |
+| `projtri_to_plane(tnum, x, y, res)` | `STRUCT(x, y)` | Cell centre in plane coords |
+| `projtri_to_projtri(tnum, x, y, res)` | `STRUCT(tnum, x, y)` | Round-trip validation |
+| `projtri_to_q2dd(tnum, x, y, res)` | `STRUCT(quad, x, y)` | Cell centre in Q2DD coords |
+| `projtri_to_q2di(tnum, x, y, res)` | `STRUCT(quad, i, j)` | Cell index in Q2DI coords |
+| `projtri_to_seqnum(tnum, x, y, res)` | `UBIGINT` | Cell sequence number |
+
+---
+
+## Running tests
+
 ```sh
 make test
 ```
-
-### Installing the deployed binaries
-To install your extension binaries from S3, you will need to do two things. Firstly, DuckDB should be launched with the
-`allow_unsigned_extensions` option set to true. How to set this will depend on the client you're using. Some examples:
-
-CLI:
-```shell
-duckdb -unsigned
-```
-
-Python:
-```python
-con = duckdb.connect(':memory:', config={'allow_unsigned_extensions' : 'true'})
-```
-
-NodeJS:
-```js
-db = new duckdb.Database(':memory:', {"allow_unsigned_extensions": "true"});
-```
-
-Secondly, you will need to set the repository endpoint in DuckDB to the HTTP url of your bucket + version of the extension
-you want to install. To do this run the following SQL query in DuckDB:
-```sql
-SET custom_extension_repository='bucket.s3.eu-west-1.amazonaws.com/<your_extension_name>/latest';
-```
-Note that the `/latest` path will allow you to install the latest extension version available for your current version of
-DuckDB. To specify a specific version, you can pass the version instead.
-
-After running these steps, you can install and load your extension using the regular INSTALL/LOAD commands in DuckDB:
-```sql
-INSTALL duck_dggs;
-LOAD duck_dggs;
-```
-
-## Setting up CLion
-
-### Opening project
-Configuring CLion with this extension requires a little work. Firstly, make sure that the DuckDB submodule is available.
-Then make sure to open `./duckdb/CMakeLists.txt` (so not the top level `CMakeLists.txt` file from this repo) as a project in CLion.
-Now to fix your project path go to `tools->CMake->Change Project Root`([docs](https://www.jetbrains.com/help/clion/change-project-root-directory.html)) to set the project root to the root dir of this repo.
-
-### Debugging
-To set up debugging in CLion, there are two simple steps required. Firstly, in `CLion -> Settings / Preferences -> Build, Execution, Deploy -> CMake` you will need to add the desired builds (e.g. Debug, Release, RelDebug, etc). There's different ways to configure this, but the easiest is to leave all empty, except the `build path`, which needs to be set to `../build/{build type}`, and CMake Options to which the following flag should be added, with the path to the extension CMakeList:
-
-```
--DDUCKDB_EXTENSION_CONFIGS=<path_to_the_exentension_CMakeLists.txt>
-```
-
-The second step is to configure the unittest runner as a run/debug configuration. To do this, go to `Run -> Edit Configurations` and click `+ -> Cmake Application`. The target and executable should be `unittest`. This will run all the DuckDB tests. To specify only running the extension specific tests, add `--test-dir ../../.. [sql]` to the `Program Arguments`. Note that it is recommended to use the `unittest` executable for testing/development within CLion. The actual DuckDB CLI currently does not reliably work as a run target in CLion.
