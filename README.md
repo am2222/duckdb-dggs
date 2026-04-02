@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="duck_dggs_icon.svg" width="120" alt="duck_dggs"/>
+  <img src="duck_dggs_icon.svg" width="240" alt="duck_dggs"/>
   <h1>duck_dggs</h1>
   <p>A DuckDB extension for discrete global grid systems (DGGS) powered by <a href="https://github.com/sahrk/DGGRID">DGGRID v8</a>.<br/>
   Transforms geographic coordinates to and from ISEA grid cell identifiers across multiple reference frames.</p>

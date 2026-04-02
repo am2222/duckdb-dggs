@@ -37,10 +37,17 @@ SELECT (geo_to_q2dd(0.0, 0.0, 5)).quad = 3
 ----
 true
 
+# geo_to_projtri at (0,0) lands on the boundary between icosahedron triangles 2
+# and 7.  The assignment is platform-dependent (x86 vs ARM floating-point), so
+# accept either adjacent triangle and check the coordinates to 1e-9.
 query I
-SELECT geo_to_projtri(0.0, 0.0, 5);
+SELECT
+  (((geo_to_projtri(0.0, 0.0, 5)).tnum = 7 AND abs((geo_to_projtri(0.0, 0.0, 5)).x - 0.6734916112035678) < 1e-9)
+   OR
+   ((geo_to_projtri(0.0, 0.0, 5)).tnum = 2 AND abs((geo_to_projtri(0.0, 0.0, 5)).x - 0.32650838876079025) < 1e-9))
+  AND abs((geo_to_projtri(0.0, 0.0, 5)).y) < 1e-9;
 ----
-{'tnum': 7, 'x': 0.6734916112035678, 'y': -1.6238500936416828e-11}
+true
 
 query I
 SELECT geo_to_geo(0.0, 0.0, 5);
