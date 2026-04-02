@@ -54,6 +54,15 @@ add_dependencies(${LOADABLE_EXTENSION_NAME} dglib)
 target_link_libraries(${EXTENSION_NAME} $<TARGET_FILE:dglib>)
 target_link_libraries(${LOADABLE_EXTENSION_NAME} $<TARGET_FILE:dglib>)
 
+# MSVC does not expose M_PI / M_PI_2 etc. unless _USE_MATH_DEFINES is set
+# before including <cmath>.  The DGGRID CMakeLists sets this for its own
+# targets but not for external consumers of dglib headers, so we must add it
+# ourselves for the duck_dggs compilation units.
+if(MSVC)
+    target_compile_definitions(${EXTENSION_NAME} PRIVATE _USE_MATH_DEFINES)
+    target_compile_definitions(${LOADABLE_EXTENSION_NAME} PRIVATE _USE_MATH_DEFINES)
+endif()
+
 # On Linux, the GCC linker (including aarch64) treats duplicate COMDAT symbols
 # (C++17 inline statics like LogicalType::DOUBLE) as hard errors when linking
 # extension object files against libduckdb_static.a.  These symbols are
