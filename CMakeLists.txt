@@ -56,9 +56,13 @@ target_link_libraries(${LOADABLE_EXTENSION_NAME} $<TARGET_FILE:dglib>)
 
 # On Linux, the GCC linker (including aarch64) treats duplicate COMDAT symbols
 # (C++17 inline statics like LogicalType::DOUBLE) as hard errors when linking
-# the extension object files against libduckdb_static.a.  These symbols are
+# extension object files against libduckdb_static.a.  These symbols are
 # identical across all TUs so multiple definitions are safe to merge.
+# INTERFACE on the static extension propagates the flag to the final test
+# binary that DuckDB's build system links (libduck_dggs_extension.a +
+# libduckdb_static.a).  PRIVATE on the loadable extension covers the .so link.
 if(UNIX AND NOT APPLE)
+    target_link_options(${EXTENSION_NAME} INTERFACE -Wl,--allow-multiple-definition)
     target_link_options(${LOADABLE_EXTENSION_NAME} PRIVATE -Wl,--allow-multiple-definition)
 endif()
 
