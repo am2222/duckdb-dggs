@@ -1,0 +1,6 @@
+{
+    "git.ignoredRepositories": [
+        "duckdb",
+        "extension-ci-tools"
+    ]
+}

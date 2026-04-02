@@ -1,0 +1,6 @@
+# name: test/sql/duck_dggs.test
+# description: test duck_dggs extension
+# group: [sql]
+
+# Require statement will ensure this test is run with this extension loaded
+require duck_dggs
