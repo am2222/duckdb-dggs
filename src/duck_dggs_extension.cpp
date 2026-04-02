@@ -6,7 +6,12 @@
 #include "duckdb/common/exception.hpp"
 #include "duckdb/function/scalar_function.hpp"
 #include "duckdb/execution/expression_executor.hpp"
+// StructVector moved to its own header in DuckDB v1.6+; fall back to vector.hpp for v1.5
+#if __has_include("duckdb/common/vector/struct_vector.hpp")
 #include "duckdb/common/vector/struct_vector.hpp"
+#else
+#include "duckdb/common/types/vector.hpp"
+#endif
 #include <duckdb/parser/parsed_data/create_scalar_function_info.hpp>
 
 namespace duckdb {
