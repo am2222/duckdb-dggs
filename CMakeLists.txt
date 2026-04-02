@@ -54,6 +54,14 @@ add_dependencies(${LOADABLE_EXTENSION_NAME} dglib)
 target_link_libraries(${EXTENSION_NAME} $<TARGET_FILE:dglib>)
 target_link_libraries(${LOADABLE_EXTENSION_NAME} $<TARGET_FILE:dglib>)
 
+# On Linux, the GCC linker (including aarch64) treats duplicate COMDAT symbols
+# (C++17 inline statics like LogicalType::DOUBLE) as hard errors when linking
+# the extension object files against libduckdb_static.a.  These symbols are
+# identical across all TUs so multiple definitions are safe to merge.
+if(UNIX AND NOT APPLE)
+    target_link_options(${LOADABLE_EXTENSION_NAME} PRIVATE -Wl,--allow-multiple-definition)
+endif()
+
 
 install(
   TARGETS ${EXTENSION_NAME}
