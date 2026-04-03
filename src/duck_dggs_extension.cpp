@@ -13,8 +13,6 @@
 #else
 #include "duckdb/common/types/vector.hpp"
 #endif
-#include "duckdb/common/types/geometry.hpp"
-#include "duckdb/common/vector/string_vector.hpp"
 #include <duckdb/parser/parsed_data/create_scalar_function_info.hpp>
 #include <dglib/DgBase.h>
 
