@@ -25,21 +25,21 @@ true
 # ============================================================
 
 query I
-SELECT geo_to_seqnum(0.0, 0.0, 5);
+SELECT geo_to_seqnum('POINT(0.0 0.0)'::GEOMETRY, 5);
 ----
 2380
 
 query I
-SELECT geo_to_q2di(0.0, 0.0, 5);
+SELECT geo_to_q2di('POINT(0.0 0.0)'::GEOMETRY, 5);
 ----
 {'quad': 3, 'i': 10, 'j': 10}
 
 # geo_to_q2dd: quad is an integer (stable); x and y are continuous
 # coordinates whose last bits differ between x86 and ARM.
 query I
-SELECT (geo_to_q2dd(0.0, 0.0, 5)).quad = 3
-   AND abs((geo_to_q2dd(0.0, 0.0, 5)).x - 0.16325419438415284) < 1e-9
-   AND abs((geo_to_q2dd(0.0, 0.0, 5)).y - 0.282764559254556) < 1e-9;
+SELECT (geo_to_q2dd('POINT(0.0 0.0)'::GEOMETRY, 5)).quad = 3
+   AND abs((geo_to_q2dd('POINT(0.0 0.0)'::GEOMETRY, 5)).x - 0.16325419438415284) < 1e-9
+   AND abs((geo_to_q2dd('POINT(0.0 0.0)'::GEOMETRY, 5)).y - 0.282764559254556) < 1e-9;
 ----
 true
 
@@ -47,25 +47,25 @@ true
 # and 7.  Accept either adjacent triangle; check coordinates to 1e-9.
 query I
 SELECT
-  (((geo_to_projtri(0.0, 0.0, 5)).tnum = 7 AND abs((geo_to_projtri(0.0, 0.0, 5)).x - 0.6734916112035678) < 1e-9)
+  (((geo_to_projtri('POINT(0.0 0.0)'::GEOMETRY, 5)).tnum = 7 AND abs((geo_to_projtri('POINT(0.0 0.0)'::GEOMETRY, 5)).x - 0.6734916112035678) < 1e-9)
    OR
-   ((geo_to_projtri(0.0, 0.0, 5)).tnum = 2 AND abs((geo_to_projtri(0.0, 0.0, 5)).x - 0.32650838876079025) < 1e-9))
-  AND abs((geo_to_projtri(0.0, 0.0, 5)).y) < 1e-9;
+   ((geo_to_projtri('POINT(0.0 0.0)'::GEOMETRY, 5)).tnum = 2 AND abs((geo_to_projtri('POINT(0.0 0.0)'::GEOMETRY, 5)).x - 0.32650838876079025) < 1e-9))
+  AND abs((geo_to_projtri('POINT(0.0 0.0)'::GEOMETRY, 5)).y) < 1e-9;
 ----
 true
 
 query I
-SELECT geo_to_geo(0.0, 0.0, 5);
+SELECT geo_to_geo('POINT(0.0 0.0)'::GEOMETRY, 5);
 ----
-{'lon_deg': 0.0, 'lat_deg': 0.0}
+POINT (0 0)
 
 # geo_to_plane: (0,0) sits on a plane-triangle boundary; x shifts by exactly
 # 1.0 between platforms.  y is √3 on both platforms — check within 1e-9.
 query I
 SELECT
-  (abs((geo_to_plane(0.0, 0.0, 5)).x - 3.326508388796432)   < 1e-9
-   OR abs((geo_to_plane(0.0, 0.0, 5)).x - 2.3265083887607902) < 1e-9)
-  AND abs((geo_to_plane(0.0, 0.0, 5)).y - 1.7320508075851162) < 1e-9;
+  (abs((geo_to_plane('POINT(0.0 0.0)'::GEOMETRY, 5)).x - 3.326508388796432)   < 1e-9
+   OR abs((geo_to_plane('POINT(0.0 0.0)'::GEOMETRY, 5)).x - 2.3265083887607902) < 1e-9)
+  AND abs((geo_to_plane('POINT(0.0 0.0)'::GEOMETRY, 5)).y - 1.7320508075851162) < 1e-9;
 ----
 true
 
@@ -138,7 +138,7 @@ true
 
 # geo → seqnum → geo → seqnum must be stable (cell centre)
 query I
-SELECT geo_to_seqnum((seqnum_to_geo(2380, 5)).lon_deg, (seqnum_to_geo(2380, 5)).lat_deg, 5);
+SELECT geo_to_seqnum(seqnum_to_geo(2380, 5), 5);
 ----
 2380
 
@@ -160,14 +160,14 @@ SELECT q2di_to_seqnum((seqnum_to_q2di(2380, 5)).quad, (seqnum_to_q2di(2380, 5)).
 
 query I
 SELECT count(*) = 3 FROM (
-    SELECT geo_to_seqnum(lon, lat, 5)
-    FROM (VALUES (0.0, 0.0), (10.0, 20.0), (-45.0, 60.0)) t(lon, lat)
+    SELECT geo_to_seqnum(geom, 5)
+    FROM (VALUES ('POINT(0.0 0.0)'::GEOMETRY), ('POINT(10.0 20.0)'::GEOMETRY), ('POINT(-45.0 60.0)'::GEOMETRY)) t(geom)
 );
 ----
 true
 
 # Different resolutions produce different cell counts
 query I
-SELECT geo_to_seqnum(0.0, 0.0, 1) != geo_to_seqnum(0.0, 0.0, 5);
+SELECT geo_to_seqnum('POINT(0.0 0.0)'::GEOMETRY, 1) != geo_to_seqnum('POINT(0.0 0.0)'::GEOMETRY, 5);
 ----
 true
