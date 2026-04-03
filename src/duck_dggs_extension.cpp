@@ -306,7 +306,8 @@ static void GeoToProjTriFun(DataChunk &args, ExpressionState &,
   for (idx_t i = 0; i < n; i++) {
     double lon, lat;
     ReadPointXY(geom[i], lon, lat);
-    WriteProjTri(result, i, dggrid::geoToProjTri(paramsWithRes(res[i]), lon, lat));
+    WriteProjTri(result, i,
+                 dggrid::geoToProjTri(paramsWithRes(res[i]), lon, lat));
   }
 }
 static void GeoToProjTriParamsFun(DataChunk &args, ExpressionState &,
