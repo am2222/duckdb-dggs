@@ -46,7 +46,7 @@ jobs:
 
   macos:
     name: MacOS
-    runs-on: macos-latest
+    runs-on: macos-latest 
     strategy:
       matrix:
         duckdb_version: ['<submodule_version>']
