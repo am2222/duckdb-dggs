@@ -136,7 +136,8 @@ static void WriteQ2DI(Vector &result, idx_t i, const dggrid::Q2DICoord &c) {
 }
 
 // Write a WKB Polygon (single exterior ring, open vertex list — we close it).
-// Layout: [byte_order:1][type:4][numRings:4][numPoints:4][x0:8][y0:8]...[x0:8][y0:8]
+// Layout:
+// [byte_order:1][type:4][numRings:4][numPoints:4][x0:8][y0:8]...[x0:8][y0:8]
 static void WriteWKBPolygon(Vector &result, idx_t i,
                             const std::vector<dggrid::GeoCoord> &verts) {
   const std::size_t n = verts.size();
@@ -147,17 +148,23 @@ static void WriteWKBPolygon(Vector &result, idx_t i,
   std::size_t off = 0;
   d[off++] = 0x01; // little-endian
   constexpr uint32_t WKB_POLYGON = 3;
-  memcpy(d + off, &WKB_POLYGON, 4); off += 4;
+  memcpy(d + off, &WKB_POLYGON, 4);
+  off += 4;
   constexpr uint32_t NUM_RINGS = 1;
-  memcpy(d + off, &NUM_RINGS, 4); off += 4;
+  memcpy(d + off, &NUM_RINGS, 4);
+  off += 4;
   const uint32_t num_pts = static_cast<uint32_t>(n + 1); // closed ring
-  memcpy(d + off, &num_pts, 4); off += 4;
+  memcpy(d + off, &num_pts, 4);
+  off += 4;
   for (std::size_t j = 0; j < n; j++) {
-    memcpy(d + off, &verts[j].lon_deg, 8); off += 8;
-    memcpy(d + off, &verts[j].lat_deg, 8); off += 8;
+    memcpy(d + off, &verts[j].lon_deg, 8);
+    off += 8;
+    memcpy(d + off, &verts[j].lat_deg, 8);
+    off += 8;
   }
   // Close the ring by repeating the first vertex.
-  memcpy(d + off, &verts[0].lon_deg, 8); off += 8;
+  memcpy(d + off, &verts[0].lon_deg, 8);
+  off += 8;
   memcpy(d + off, &verts[0].lat_deg, 8);
   str.Finalize();
   FlatVector::GetData<string_t>(result)[i] = str;
@@ -961,13 +968,13 @@ static void SeqNumToQ2DIParamsFun(DataChunk &args, ExpressionState &,
 }
 
 static void SeqNumToBoundaryFun(DataChunk &args, ExpressionState &,
-                               Vector &result) {
+                                Vector &result) {
   idx_t n = args.size();
   ArgReader<uint64_t> seqnum(args, 0, n);
   ArgReader<int32_t> res(args, 1, n);
   for (idx_t i = 0; i < n; i++)
     WriteWKBPolygon(result, i,
-                   dggrid::seqNumToBoundary(paramsWithRes(res[i]), seqnum[i]));
+                    dggrid::seqNumToBoundary(paramsWithRes(res[i]), seqnum[i]));
 }
 static void SeqNumToBoundaryParamsFun(DataChunk &args, ExpressionState &,
                                       Vector &result) {

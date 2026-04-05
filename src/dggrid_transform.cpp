@@ -54,7 +54,7 @@
 #include <dglib/DgIDGGutil.h>    // DgQ2DDCoord, DgQ2DDRF, DgPlaneTriRF
 #include <dglib/DgGridTopo.h>    // Hexagon, Triangle, Diamond, D4, D6
 #include <dglib/DgLocation.h>    // DgLocation
-#include <dglib/DgPolygon.h>    // DgPolygon / DgLocVector (cell boundary)
+#include <dglib/DgPolygon.h>     // DgPolygon / DgLocVector (cell boundary)
 #include <dglib/DgIVec2D.h>      // DgIVec2D (.i(), .j())
 #include <dglib/DgDVec2D.h>      // DgDVec2D (.x(), .y())
 #include <dglib/DgConstants.h>   // M_PIl, M_ZERO
