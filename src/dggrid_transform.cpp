@@ -54,6 +54,7 @@
 #include <dglib/DgIDGGutil.h>    // DgQ2DDCoord, DgQ2DDRF, DgPlaneTriRF
 #include <dglib/DgGridTopo.h>    // Hexagon, Triangle, Diamond, D4, D6
 #include <dglib/DgLocation.h>    // DgLocation
+#include <dglib/DgPolygon.h>     // DgPolygon / DgLocVector (cell boundary)
 #include <dglib/DgIVec2D.h>      // DgIVec2D (.i(), .j())
 #include <dglib/DgDVec2D.h>      // DgDVec2D (.x(), .y())
 #include <dglib/DgConstants.h>   // M_PIl, M_ZERO
@@ -61,6 +62,7 @@
 #include <cmath>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <sstream>
 #include <stdexcept>
 #include <unordered_map>
@@ -212,15 +214,26 @@ struct CacheKey {
 };
 
 struct CacheKeyHash {
+  // FNV-1a inspired combining — avoids the XOR-with-shift collisions of the
+  // previous version, and includes ALL seven fields (the old hash silently
+  // dropped azimuth_deg / pole_lat_deg / pole_lon_deg, causing incorrect
+  // transformer reuse when orientation parameters differed).
+  static std::size_t mix(std::size_t h, std::size_t v) noexcept {
+    return h ^ (v + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2));
+  }
   std::size_t operator()(const CacheKey &k) const noexcept {
-    return std::hash<std::string>()(k.projection) ^
-           (std::hash<unsigned int>()(k.aperture) << 4) ^
-           (std::hash<std::string>()(k.topology) << 8) ^
-           (std::hash<int>()(k.res) << 16);
+    std::size_t h = std::hash<std::string>()(k.projection);
+    h = mix(h, std::hash<unsigned int>()(k.aperture));
+    h = mix(h, std::hash<std::string>()(k.topology));
+    h = mix(h, std::hash<int>()(k.res));
+    h = mix(h, std::hash<double>()(k.azimuth_deg));
+    h = mix(h, std::hash<double>()(k.pole_lat_deg));
+    h = mix(h, std::hash<double>()(k.pole_lon_deg));
+    return h;
   }
 };
 
-static std::mutex s_mutex;
+static std::shared_mutex s_mutex;
 static std::unordered_map<CacheKey, std::shared_ptr<Transformer>, CacheKeyHash>
     s_cache;
 
@@ -307,20 +320,32 @@ static std::shared_ptr<Transformer> buildTransformer(const DggsParams &p) {
 
 // ---------------------------------------------------------------------------
 // getTransformer — returns a cached Transformer; builds on first call.
+//
+// Locking strategy:
+//  • shared_lock for fast-path cache reads (multiple threads can read in
+//    parallel without blocking each other).
+//  • unique_lock for the write path; re-checks the cache under the write
+//    lock (double-checked locking) to avoid duplicate builds when two
+//    threads race on the same key.
 // ---------------------------------------------------------------------------
 static std::shared_ptr<Transformer> getTransformer(const DggsParams &p) {
   CacheKey key{p.projection,  p.aperture,     p.topology,    p.res,
                p.azimuth_deg, p.pole_lat_deg, p.pole_lon_deg};
   {
-    std::lock_guard<std::mutex> lk(s_mutex);
+    std::shared_lock<std::shared_mutex> rl(s_mutex);
     auto it = s_cache.find(key);
     if (it != s_cache.end())
       return it->second;
   }
-  auto t = buildTransformer(p); // expensive — outside the lock
-  std::lock_guard<std::mutex> lk(s_mutex);
-  auto [it, _] = s_cache.emplace(key, std::move(t));
-  return it->second;
+  // Cache miss — build under exclusive lock with double-check to prevent
+  // duplicate construction by racing threads.
+  std::unique_lock<std::shared_mutex> wl(s_mutex);
+  auto it = s_cache.find(key);
+  if (it != s_cache.end())
+    return it->second;
+  auto t = buildTransformer(p);
+  auto [ins, _] = s_cache.emplace(key, std::move(t));
+  return ins->second;
 }
 
 // ===========================================================================
@@ -650,6 +675,28 @@ SeqNum seqNumToSeqNum(const DggsParams &p, SeqNum seqnum) {
   SeqNum r = 0;
   t->outSEQNUM(loc, r);
   return r;
+}
+
+std::vector<GeoCoord> seqNumToBoundary(const DggsParams &p, SeqNum seqnum) {
+  auto t = getTransformer(p);
+
+  // Resolve Q2DI from the sequence number.
+  DgQ2DICoord q2di =
+      t->bndRF->addFromSeqNum(static_cast<unsigned long long int>(seqnum));
+
+  // setAddVertices fills the polygon with boundary vertices already converted
+  // to the reference frame the DgPolygon was constructed with (geoRF here).
+  DgPolygon poly(*t->geoRF);
+  t->dgg->setAddVertices(q2di, poly, 0 /* densify */);
+
+  std::vector<GeoCoord> result;
+  result.reserve(static_cast<std::size_t>(poly.size()));
+  for (int i = 0; i < poly.size(); i++) {
+    const DgGeoCoord *c = t->geoRF->getAddress(poly[i]);
+    result.push_back(
+        {static_cast<double>(c->lonDegs()), static_cast<double>(c->latDegs())});
+  }
+  return result;
 }
 
 } // namespace dggrid

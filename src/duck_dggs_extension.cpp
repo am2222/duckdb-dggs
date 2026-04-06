@@ -135,6 +135,41 @@ static void WriteQ2DI(Vector &result, idx_t i, const dggrid::Q2DICoord &c) {
   FlatVector::GetData<int64_t>(GetStructEntry(entries, 2))[i] = c.j;
 }
 
+// Write a WKB Polygon (single exterior ring, open vertex list — we close it).
+// Layout:
+// [byte_order:1][type:4][numRings:4][numPoints:4][x0:8][y0:8]...[x0:8][y0:8]
+static void WriteWKBPolygon(Vector &result, idx_t i,
+                            const std::vector<dggrid::GeoCoord> &verts) {
+  const std::size_t n = verts.size();
+  // 1 (order) + 4 (type) + 4 (numRings) + 4 (numPoints) + (n+1)*16 (points)
+  const idx_t sz = static_cast<idx_t>(13 + (n + 1) * 16);
+  auto str = StringVector::EmptyString(result, sz);
+  auto *d = reinterpret_cast<uint8_t *>(str.GetDataWriteable());
+  std::size_t off = 0;
+  d[off++] = 0x01; // little-endian
+  constexpr uint32_t WKB_POLYGON = 3;
+  memcpy(d + off, &WKB_POLYGON, 4);
+  off += 4;
+  constexpr uint32_t NUM_RINGS = 1;
+  memcpy(d + off, &NUM_RINGS, 4);
+  off += 4;
+  const uint32_t num_pts = static_cast<uint32_t>(n + 1); // closed ring
+  memcpy(d + off, &num_pts, 4);
+  off += 4;
+  for (std::size_t j = 0; j < n; j++) {
+    memcpy(d + off, &verts[j].lon_deg, 8);
+    off += 8;
+    memcpy(d + off, &verts[j].lat_deg, 8);
+    off += 8;
+  }
+  // Close the ring by repeating the first vertex.
+  memcpy(d + off, &verts[0].lon_deg, 8);
+  off += 8;
+  memcpy(d + off, &verts[0].lat_deg, 8);
+  str.Finalize();
+  FlatVector::GetData<string_t>(result)[i] = str;
+}
+
 // ===========================================================================
 // Input readers
 // ===========================================================================
@@ -932,6 +967,28 @@ static void SeqNumToQ2DIParamsFun(DataChunk &args, ExpressionState &,
   }
 }
 
+static void SeqNumToBoundaryFun(DataChunk &args, ExpressionState &,
+                                Vector &result) {
+  idx_t n = args.size();
+  ArgReader<uint64_t> seqnum(args, 0, n);
+  ArgReader<int32_t> res(args, 1, n);
+  for (idx_t i = 0; i < n; i++)
+    WriteWKBPolygon(result, i,
+                    dggrid::seqNumToBoundary(paramsWithRes(res[i]), seqnum[i]));
+}
+static void SeqNumToBoundaryParamsFun(DataChunk &args, ExpressionState &,
+                                      Vector &result) {
+  idx_t n = args.size();
+  ArgReader<uint64_t> seqnum(args, 0, n);
+  ArgReader<int32_t> res(args, 1, n);
+  ParamsReader params(args.data[2], n);
+  for (idx_t i = 0; i < n; i++) {
+    auto p = params[i];
+    p.res = res[i];
+    WriteWKBPolygon(result, i, dggrid::seqNumToBoundary(p, seqnum[i]));
+  }
+}
+
 static void SeqNumToSeqNumFun(DataChunk &args, ExpressionState &,
                               Vector &result) {
   BinaryExecutor::Execute<uint64_t, int32_t, uint64_t>(
@@ -1051,6 +1108,8 @@ static void LoadInternal(ExtensionLoader &loader) {
   reg("seqnum_to_q2di", {UB, I}, Q2DI, SeqNumToQ2DIFun, SeqNumToQ2DIParamsFun);
   reg("seqnum_to_seqnum", {UB, I}, UB, SeqNumToSeqNumFun,
       SeqNumToSeqNumParamsFun);
+  reg("seqnum_to_boundary", {UB, I}, GEO, SeqNumToBoundaryFun,
+      SeqNumToBoundaryParamsFun);
 }
 
 void DuckDggsExtension::Load(ExtensionLoader &loader) { LoadInternal(loader); }

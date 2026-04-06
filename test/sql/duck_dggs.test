@@ -171,3 +171,124 @@ query I
 SELECT geo_to_seqnum('POINT(0.0 0.0)'::GEOMETRY, 1) != geo_to_seqnum('POINT(0.0 0.0)'::GEOMETRY, 5);
 ----
 true
+
+# ============================================================
+# seqnum_to_boundary — structural tests (seqnum=2380, res=5)
+#
+# seqnum 2380 is the ISEA4H res-5 cell centred at (0,0), Q2DI
+# (quad=3, i=10, j=10).  It is a regular hexagon, so the closed
+# WKB ring has 6 distinct vertices + 1 closing repeat = 7 points.
+# ============================================================
+
+require spatial
+
+# Returns a POLYGON geometry (not null, not a point or linestring)
+query I
+SELECT ST_GeometryType(seqnum_to_boundary(2380, 5));
+----
+POLYGON
+
+# A hexagon ring has 6 vertices; WKB closes the ring → 7 points total
+query I
+SELECT ST_NPoints(seqnum_to_boundary(2380, 5));
+----
+7
+
+# The polygon must be geometrically valid (no self-intersections, etc.)
+query I
+SELECT ST_IsValid(seqnum_to_boundary(2380, 5));
+----
+true
+
+# The ring must be closed: first point equals last point
+query I
+SELECT ST_Equals(
+    ST_PointN(ST_ExteriorRing(seqnum_to_boundary(2380, 5)), 1),
+    ST_PointN(ST_ExteriorRing(seqnum_to_boundary(2380, 5)),
+              ST_NPoints(seqnum_to_boundary(2380, 5)))
+);
+----
+true
+
+# The cell centre (seqnum_to_geo) must lie inside its own boundary polygon.
+# This is the fundamental correctness check: boundary and centre agree.
+query I
+SELECT ST_Contains(
+    seqnum_to_boundary(2380, 5),
+    seqnum_to_geo(2380, 5)
+);
+----
+true
+
+# All vertices must be within a reasonable distance of the cell centre.
+# At res=5 ISEA4H the circumradius is < 2 degrees; we use 3 as a safe bound.
+query I
+SELECT bool_and(
+    ST_Distance(
+        ST_PointN(ST_ExteriorRing(seqnum_to_boundary(2380, 5)), v),
+        seqnum_to_geo(2380, 5)
+    ) < 3.0
+) FROM generate_series(1, 6) t(v);
+----
+true
+
+# The polygon has exactly one ring (no holes in a DGGS cell)
+query I
+SELECT ST_NRings(seqnum_to_boundary(2380, 5));
+----
+1
+
+# ── params overload ──────────────────────────────────────────
+
+# dggs_params overload must produce the same polygon as the simple form
+query I
+SELECT ST_Equals(
+    seqnum_to_boundary(2380, 5),
+    seqnum_to_boundary(2380, 5, dggs_params('ISEA', 4, 'HEXAGON', 0.0, 58.28252559, 11.25))
+);
+----
+true
+
+# ── resolution sensitivity ───────────────────────────────────
+
+# A coarser cell (res=3) containing the same point must be strictly larger
+query I
+SELECT ST_Area(seqnum_to_boundary(geo_to_seqnum('POINT(10.0 20.0)'::GEOMETRY, 3), 3))
+     > ST_Area(seqnum_to_boundary(geo_to_seqnum('POINT(10.0 20.0)'::GEOMETRY, 5), 5));
+----
+true
+
+# ── neighbour separation ─────────────────────────────────────
+
+# Adjacent cells must not contain each other's centres
+query I
+SELECT
+    NOT ST_Contains(seqnum_to_boundary(2380, 5), seqnum_to_geo(2381, 5))
+AND NOT ST_Contains(seqnum_to_boundary(2381, 5), seqnum_to_geo(2380, 5));
+----
+true
+
+# ── vectorised ───────────────────────────────────────────────
+
+# Works on a table of seqnums; every row returns a valid polygon
+query I
+SELECT bool_and(ST_IsValid(seqnum_to_boundary(seqnum, 5)))
+FROM (VALUES (2380::UBIGINT), (2381::UBIGINT), (2382::UBIGINT), (100::UBIGINT)) t(seqnum);
+----
+true
+
+# Every boundary polygon contains its own centre point
+query I
+SELECT bool_and(ST_Contains(seqnum_to_boundary(seqnum, 5), seqnum_to_geo(seqnum, 5)))
+FROM (VALUES (2380::UBIGINT), (2381::UBIGINT), (2382::UBIGINT), (100::UBIGINT)) t(seqnum);
+----
+true
+
+# ── round-trip consistency ───────────────────────────────────
+
+# Any point inside a cell boundary must map back to the same seqnum.
+# We use the centroid (= cell centre for convex cells) as a proxy.
+query I
+SELECT geo_to_seqnum(seqnum_to_geo(2380, 5), 5);
+----
+2380
