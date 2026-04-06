@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.3](https://github.com/am2222/duckdb-dggs/compare/v0.1.2...v0.1.3) (2026-04-06)
+
+
+### Features
+
+* Implement seqNumToBoundary function and associated WKB output ([28c81ad](https://github.com/am2222/duckdb-dggs/commit/28c81ad408ce97c98bd201ba103bc4546976573e))
+
+
+### Bug Fixes
+
+* Add description.yml for duck_dggs extension metadata and documentation ([9dc8d08](https://github.com/am2222/duckdb-dggs/commit/9dc8d085a804db9bba96ef5c13684fc1e1ac03d9))
+
 ## [0.1.2](https://github.com/am2222/duckdb-dggs/compare/v0.1.1...v0.1.2) (2026-04-03)
 
 
