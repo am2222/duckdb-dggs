@@ -59,6 +59,7 @@ Every function has a second overload that accepts an explicit [`dggs_params`](#d
 | **Q2DD** | `STRUCT(quad UBIGINT, x DOUBLE, y DOUBLE)` | Quad number + continuous (x, y) coordinates within the quad. |
 | **PROJTRI** | `STRUCT(tnum UBIGINT, x DOUBLE, y DOUBLE)` | Icosahedron triangle number + (x, y) within the projected triangle. |
 | **PLANE** | `STRUCT(x DOUBLE, y DOUBLE)` | Unfolded icosahedron plane coordinates. |
+| **VERTEX2DD** | `STRUCT(keep BOOLEAN, vert_num INTEGER, tri_num INTEGER, x DOUBLE, y DOUBLE)` | Vertex-based 2D coordinate with triangle and vertex metadata. |
 
 ## Function Index
 
@@ -97,6 +98,23 @@ Every function has a second overload that accepts an explicit [`dggs_params`](#d
 | [`projtri_to_q2dd`](#projtri_to_q2dd) | PROJTRI, res | Q2DD | Projected triangle coords → quad/continuous coords. |
 | [`projtri_to_projtri`](#projtri_to_projtri) | PROJTRI, res | PROJTRI | Re-encode a cell in projected triangle form. |
 | [`projtri_to_plane`](#projtri_to_plane) | PROJTRI, res | PLANE | Projected triangle coords → unfolded plane coords. |
+| [`dggs_n_cells`](#dggs_n_cells) | res | `UBIGINT` | Number of cells at a given resolution. |
+| [`dggs_cell_area_km`](#dggs_cell_area_km) | res | `DOUBLE` | Cell area in km² at a given resolution. |
+| [`dggs_cell_dist_km`](#dggs_cell_dist_km) | res | `DOUBLE` | Cell spacing in km at a given resolution. |
+| [`dggs_cls_km`](#dggs_cls_km) | res | `DOUBLE` | Characteristic length scale in km. |
+| [`dggs_res_info`](#dggs_res_info) | res | `STRUCT` | All grid statistics for a resolution. |
+| [`seqnum_neighbors`](#seqnum_neighbors) | SEQNUM, res | `UBIGINT[]` | Topologically adjacent cells. |
+| [`seqnum_parent`](#seqnum_parent) | SEQNUM, res | `UBIGINT` | Parent cell at res-1. |
+| [`seqnum_all_parents`](#seqnum_all_parents) | SEQNUM, res | `UBIGINT[]` | All touching parent cells at res-1. |
+| [`seqnum_children`](#seqnum_children) | SEQNUM, res | `UBIGINT[]` | Child cells at res+1. |
+| [`seqnum_to_zorder`](#seqnum_to_zorder) | SEQNUM, res | `UBIGINT` | Sequential index to Z-order index. |
+| [`zorder_to_seqnum`](#zorder_to_seqnum) | ZORDER, res | `UBIGINT` | Z-order index to sequential index. |
+| [`seqnum_to_z3`](#seqnum_to_z3) | SEQNUM, res | `UBIGINT` | Sequential index to Z3 index (aperture 3). |
+| [`z3_to_seqnum`](#z3_to_seqnum) | Z3, res | `UBIGINT` | Z3 index to sequential index. |
+| [`seqnum_to_z7`](#seqnum_to_z7) | SEQNUM, res | `UBIGINT` | Sequential index to Z7 index (aperture 7). |
+| [`z7_to_seqnum`](#z7_to_seqnum) | Z7, res | `UBIGINT` | Z7 index to sequential index. |
+| [`seqnum_to_vertex2dd`](#seqnum_to_vertex2dd) | SEQNUM, res | VERTEX2DD | Sequential index to vertex 2DD coords. |
+| [`vertex2dd_to_seqnum`](#vertex2dd_to_seqnum) | VERTEX2DD, res | `UBIGINT` | Vertex 2DD coords to sequential index. |
 
 ----
 
@@ -138,9 +156,12 @@ SELECT duck_dggs_version();
 ```sql
 STRUCT dggs_params (projection VARCHAR, aperture INTEGER, topology VARCHAR,
                    azimuth_deg DOUBLE, pole_lat_deg DOUBLE, pole_lon_deg DOUBLE)
+STRUCT dggs_params (projection VARCHAR, aperture INTEGER, topology VARCHAR,
+                   azimuth_deg DOUBLE, pole_lat_deg DOUBLE, pole_lon_deg DOUBLE,
+                   is_aperture_sequence BOOLEAN, aperture_sequence VARCHAR)
 ```
 
-Return type: `STRUCT(projection VARCHAR, aperture INTEGER, topology VARCHAR, azimuth_deg DOUBLE, pole_lat_deg DOUBLE, pole_lon_deg DOUBLE)`
+Return type: `STRUCT(projection VARCHAR, aperture INTEGER, topology VARCHAR, azimuth_deg DOUBLE, pole_lat_deg DOUBLE, pole_lon_deg DOUBLE, is_aperture_sequence BOOLEAN, aperture_sequence VARCHAR)`
 
 #### Description
 
@@ -156,6 +177,8 @@ orientation and topology.
 | `azimuth_deg` | `DOUBLE` | Rotation of the icosahedron around the pole axis, in degrees. |
 | `pole_lat_deg` | `DOUBLE` | Latitude of the icosahedron pole, in degrees. Default ISEA: `58.28252559`. |
 | `pole_lon_deg` | `DOUBLE` | Longitude of the icosahedron pole, in degrees. Default ISEA: `11.25`. |
+| `is_aperture_sequence` | `BOOLEAN` | When `true`, uses a mixed-aperture sequence instead of a fixed aperture. Default: `false`. |
+| `aperture_sequence` | `VARCHAR` | A string of digits (`'3'`, `'4'`, `'7'`) defining the aperture at each resolution level. Only used when `is_aperture_sequence` is `true`. |
 
 The resolution is **not** part of `dggs_params`; it is always passed as a
 separate `INTEGER` argument to the transform function.
@@ -172,6 +195,11 @@ SELECT dggs_params('ISEA', 4, 'HEXAGON', 0.0, 58.28252559, 11.25);
 ├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
 │ {'projection': ISEA, 'aperture': 4, 'topology': HEXAGON, 'azimuth_deg': 0.0, 'pole_lat_deg': 58.28252559, 'pole_lon_deg': 11.25} │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+```sql
+-- Mixed-aperture grid (aperture 3 at res 1, then 4, then 3, then 7)
+SELECT dggs_params('ISEA', 3, 'HEXAGON', 0.0, 58.28252559, 11.25, true, '3437');
 ```
 
 ----
@@ -1166,6 +1194,490 @@ SELECT projtri_to_plane(7, 0.6875, 0.0, 5);
 ├────────────────────────────────────────┤
 │ {'x': 2.3125, 'y': 1.7320508075688772} │
 └────────────────────────────────────────┘
+```
+
+----
+
+## Grid Statistics
+
+### dggs_n_cells
+
+#### Signatures
+
+```sql
+UBIGINT dggs_n_cells (res INTEGER)
+UBIGINT dggs_n_cells (res INTEGER, params STRUCT)
+```
+
+#### Description
+
+Returns the total number of cells at the given resolution.
+
+#### Example
+
+```sql
+SELECT dggs_n_cells(5);
+```
+```
+┌─────────────────┐
+│ dggs_n_cells(5) │
+│     uint64      │
+├─────────────────┤
+│           10242 │
+└─────────────────┘
+```
+
+----
+
+### dggs_cell_area_km
+
+#### Signatures
+
+```sql
+DOUBLE dggs_cell_area_km (res INTEGER)
+DOUBLE dggs_cell_area_km (res INTEGER, params STRUCT)
+```
+
+#### Description
+
+Returns the average cell area in km² at the given resolution.
+
+#### Example
+
+```sql
+SELECT dggs_cell_area_km(5);
+```
+```
+┌──────────────────────┐
+│ dggs_cell_area_km(5) │
+│        double        │
+├──────────────────────┤
+│    49811.09587149303  │
+└──────────────────────┘
+```
+
+----
+
+### dggs_cell_dist_km
+
+#### Signatures
+
+```sql
+DOUBLE dggs_cell_dist_km (res INTEGER)
+DOUBLE dggs_cell_dist_km (res INTEGER, params STRUCT)
+```
+
+#### Description
+
+Returns the average cell spacing (distance between cell centres) in km at the given resolution.
+
+#### Example
+
+```sql
+SELECT dggs_cell_dist_km(5);
+```
+```
+┌──────────────────────┐
+│ dggs_cell_dist_km(5) │
+│        double        │
+├──────────────────────┤
+│    220.4266384815885  │
+└──────────────────────┘
+```
+
+----
+
+### dggs_cls_km
+
+#### Signatures
+
+```sql
+DOUBLE dggs_cls_km (res INTEGER)
+DOUBLE dggs_cls_km (res INTEGER, params STRUCT)
+```
+
+#### Description
+
+Returns the characteristic length scale (CLS) in km at the given resolution.
+
+#### Example
+
+```sql
+SELECT dggs_cls_km(5);
+```
+```
+┌────────────────────┐
+│   dggs_cls_km(5)   │
+│       double       │
+├────────────────────┤
+│ 251.84027008853553 │
+└────────────────────┘
+```
+
+----
+
+### dggs_res_info
+
+#### Signatures
+
+```sql
+STRUCT dggs_res_info (res INTEGER)
+STRUCT dggs_res_info (res INTEGER, params STRUCT)
+```
+
+Return type: `STRUCT(res INTEGER, cells UBIGINT, area_km DOUBLE, spacing_km DOUBLE, cls_km DOUBLE)`
+
+#### Description
+
+Returns all grid statistics for the given resolution as a single struct.
+
+#### Example
+
+```sql
+SELECT dggs_res_info(5);
+```
+```
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                                    dggs_res_info(5)                                                     │
+│                  struct(res integer, cells ubigint, area_km double, spacing_km double, cls_km double)                   │
+├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ {'res': 5, 'cells': 10242, 'area_km': 49811.09587149303, 'spacing_km': 220.4266384815885, 'cls_km': 251.84027008853553} │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+----
+
+## Neighbors
+
+### seqnum_neighbors
+
+#### Signatures
+
+```sql
+UBIGINT[] seqnum_neighbors (seqnum UBIGINT, res INTEGER)
+UBIGINT[] seqnum_neighbors (seqnum UBIGINT, res INTEGER, params STRUCT)
+```
+
+#### Description
+
+Returns the sequential indices of all topologically adjacent cells. For hexagon grids, interior cells have 6 neighbors; pentagon cells (at icosahedron vertices) have 5. The result does not include the input cell itself.
+
+#### Example
+
+```sql
+SELECT seqnum_neighbors(2380::UBIGINT, 5);
+```
+```
+┌──────────────────────────────────────────────────┐
+│ seqnum_neighbors(CAST(2380 AS "UBIGINT"), 5)     │
+│                   uint64[]                       │
+├──────────────────────────────────────────────────┤
+│ [2412, 2413, 2381, 2348, 2347, 2379]             │
+└──────────────────────────────────────────────────┘
+```
+
+----
+
+## Parent / Child Hierarchy
+
+### seqnum_parent
+
+#### Signatures
+
+```sql
+UBIGINT seqnum_parent (seqnum UBIGINT, res INTEGER)
+UBIGINT seqnum_parent (seqnum UBIGINT, res INTEGER, params STRUCT)
+```
+
+#### Description
+
+Returns the sequential index of the parent cell at resolution `res - 1` that contains the centre of the given cell. The resolution must be > 0.
+
+#### Example
+
+```sql
+SELECT seqnum_parent(2380::UBIGINT, 5);
+```
+```
+┌───────────────────────────────────────────┐
+│ seqnum_parent(CAST(2380 AS "UBIGINT"), 5) │
+│                  uint64                   │
+├───────────────────────────────────────────┤
+│                                       599 │
+└───────────────────────────────────────────┘
+```
+
+----
+
+### seqnum_all_parents
+
+#### Signatures
+
+```sql
+UBIGINT[] seqnum_all_parents (seqnum UBIGINT, res INTEGER)
+UBIGINT[] seqnum_all_parents (seqnum UBIGINT, res INTEGER, params STRUCT)
+```
+
+#### Description
+
+Returns the sequential indices of all parent cells at resolution `res - 1` that touch the given cell. Interior cells typically have 1 parent; cells on a parent-cell boundary may touch 2 or 3 parents. The primary (containing) parent is always the first element.
+
+#### Example
+
+```sql
+-- Cell 2412 sits on a parent boundary, touching 3 parents
+SELECT seqnum_all_parents(2412::UBIGINT, 5);
+```
+```
+┌────────────────────────────────────────────────┐
+│ seqnum_all_parents(CAST(2412 AS "UBIGINT"), 5) │
+│                    uint64[]                    │
+├────────────────────────────────────────────────┤
+│ [615, 599, 616]                                │
+└────────────────────────────────────────────────┘
+```
+
+----
+
+### seqnum_children
+
+#### Signatures
+
+```sql
+UBIGINT[] seqnum_children (seqnum UBIGINT, res INTEGER)
+UBIGINT[] seqnum_children (seqnum UBIGINT, res INTEGER, params STRUCT)
+```
+
+#### Description
+
+Returns the sequential indices of all child cells at resolution `res + 1` that belong to the given cell. For aperture-4 hexagon grids this returns 7 children (1 interior + 6 boundary).
+
+#### Example
+
+```sql
+SELECT seqnum_children(599::UBIGINT, 4);
+```
+```
+┌────────────────────────────────────────────┐
+│ seqnum_children(CAST(599 AS "UBIGINT"), 4) │
+│                  uint64[]                  │
+├────────────────────────────────────────────┤
+│ [2380, 2412, 2413, 2381, 2348, 2347, 2379] │
+└────────────────────────────────────────────┘
+```
+
+----
+
+## Hierarchical Index Conversions
+
+These functions convert between the sequential cell index and alternative hierarchical indexing schemes. Z-order and Z3/Z7 indices encode spatial locality, which can be useful for range queries and spatial sorting.
+
+### seqnum_to_zorder
+
+#### Signatures
+
+```sql
+UBIGINT seqnum_to_zorder (seqnum UBIGINT, res INTEGER)
+UBIGINT seqnum_to_zorder (seqnum UBIGINT, res INTEGER, params STRUCT)
+```
+
+#### Description
+
+Converts a sequential cell index to its Z-order (Morton code) index. Available for aperture 3 and aperture 4 grids.
+
+#### Example
+
+```sql
+SELECT seqnum_to_zorder(2380::UBIGINT, 5);
+```
+```
+┌──────────────────────────────────────────────┐
+│ seqnum_to_zorder(CAST(2380 AS "UBIGINT"), 5) │
+│                    uint64                    │
+├──────────────────────────────────────────────┤
+│                          3688448094816436224  │
+└──────────────────────────────────────────────┘
+```
+
+----
+
+### zorder_to_seqnum
+
+#### Signatures
+
+```sql
+UBIGINT zorder_to_seqnum (value UBIGINT, res INTEGER)
+UBIGINT zorder_to_seqnum (value UBIGINT, res INTEGER, params STRUCT)
+```
+
+#### Description
+
+Converts a Z-order index back to a sequential cell index.
+
+#### Example
+
+```sql
+SELECT zorder_to_seqnum(3688448094816436224::UBIGINT, 5);
+-- → 2380
+```
+
+----
+
+### seqnum_to_z3
+
+#### Signatures
+
+```sql
+UBIGINT seqnum_to_z3 (seqnum UBIGINT, res INTEGER)
+UBIGINT seqnum_to_z3 (seqnum UBIGINT, res INTEGER, params STRUCT)
+```
+
+#### Description
+
+Converts a sequential cell index to its Z3 hierarchical index. Only available for aperture 3 hexagon grids.
+
+#### Example
+
+```sql
+SELECT seqnum_to_z3(100::UBIGINT, 4,
+    dggs_params('ISEA', 3, 'HEXAGON', 0.0, 58.28252559, 11.25));
+```
+```
+┌─────────────────────┐
+│       uint64        │
+├─────────────────────┤
+│ 2994893752201379839 │
+└─────────────────────┘
+```
+
+----
+
+### z3_to_seqnum
+
+#### Signatures
+
+```sql
+UBIGINT z3_to_seqnum (value UBIGINT, res INTEGER)
+UBIGINT z3_to_seqnum (value UBIGINT, res INTEGER, params STRUCT)
+```
+
+#### Description
+
+Converts a Z3 index back to a sequential cell index.
+
+#### Example
+
+```sql
+SELECT z3_to_seqnum(2994893752201379839::UBIGINT, 4,
+    dggs_params('ISEA', 3, 'HEXAGON', 0.0, 58.28252559, 11.25));
+-- → 100
+```
+
+----
+
+### seqnum_to_z7
+
+#### Signatures
+
+```sql
+UBIGINT seqnum_to_z7 (seqnum UBIGINT, res INTEGER)
+UBIGINT seqnum_to_z7 (seqnum UBIGINT, res INTEGER, params STRUCT)
+```
+
+#### Description
+
+Converts a sequential cell index to its Z7 hierarchical index. Only available for aperture 7 hexagon grids.
+
+#### Example
+
+```sql
+SELECT seqnum_to_z7(100::UBIGINT, 4,
+    dggs_params('ISEA', 7, 'HEXAGON', 0.0, 58.28252559, 11.25));
+```
+```
+┌─────────────────────┐
+│       uint64        │
+├─────────────────────┤
+│ 1162491653815009279 │
+└─────────────────────┘
+```
+
+----
+
+### z7_to_seqnum
+
+#### Signatures
+
+```sql
+UBIGINT z7_to_seqnum (value UBIGINT, res INTEGER)
+UBIGINT z7_to_seqnum (value UBIGINT, res INTEGER, params STRUCT)
+```
+
+#### Description
+
+Converts a Z7 index back to a sequential cell index.
+
+#### Example
+
+```sql
+SELECT z7_to_seqnum(1162491653815009279::UBIGINT, 4,
+    dggs_params('ISEA', 7, 'HEXAGON', 0.0, 58.28252559, 11.25));
+-- → 100
+```
+
+----
+
+### seqnum_to_vertex2dd
+
+#### Signatures
+
+```sql
+STRUCT seqnum_to_vertex2dd (seqnum UBIGINT, res INTEGER)
+STRUCT seqnum_to_vertex2dd (seqnum UBIGINT, res INTEGER, params STRUCT)
+```
+
+Return type: `STRUCT(keep BOOLEAN, vert_num INTEGER, tri_num INTEGER, x DOUBLE, y DOUBLE)`
+
+#### Description
+
+Converts a sequential cell index to its VERTEX2DD representation, which encodes the cell using vertex-based coordinates with triangle metadata.
+
+#### Example
+
+```sql
+SELECT seqnum_to_vertex2dd(2380::UBIGINT, 5);
+```
+```
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                   seqnum_to_vertex2dd(CAST(2380 AS "UBIGINT"), 5)                   │
+│     struct(keep boolean, vert_num integer, tri_num integer, x double, y double)     │
+├─────────────────────────────────────────────────────────────────────────────────────┤
+│ {'keep': true, 'vert_num': 3, 'tri_num': 1, 'x': 0.15625, 'y': 0.27063293868263705} │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+----
+
+### vertex2dd_to_seqnum
+
+#### Signatures
+
+```sql
+UBIGINT vertex2dd_to_seqnum (keep BOOLEAN, vert_num INTEGER, tri_num INTEGER,
+                             x DOUBLE, y DOUBLE, res INTEGER)
+UBIGINT vertex2dd_to_seqnum (keep BOOLEAN, vert_num INTEGER, tri_num INTEGER,
+                             x DOUBLE, y DOUBLE, res INTEGER, params STRUCT)
+```
+
+#### Description
+
+Converts VERTEX2DD coordinates back to a sequential cell index.
+
+#### Example
+
+```sql
+SELECT vertex2dd_to_seqnum(true, 3, 1, 0.15625, 0.27063293868263705, 5);
+-- → 2380
 ```
 
 ----

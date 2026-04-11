@@ -1,0 +1,70 @@
+<svg width="512" height="512" viewBox="0 0 680 680" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <clipPath id="bg"><circle cx="340" cy="340" r="308"/></clipPath>
+</defs>
+<circle cx="340" cy="340" r="308" fill="#0d1117"/>
+<circle cx="340" cy="340" r="302" fill="none" stroke="#1e2d45" stroke-width="1.5"/>
+<g clip-path="url(#bg)" opacity="0.32">
+  <polygon fill="none" stroke="#FFC300" stroke-width="1.6" points="140,60 180,83 180,129 140,152 100,129 100,83"/>
+  <polygon fill="none" stroke="#FFC300" stroke-width="1.6" points="220,60 260,83 260,129 220,152 180,129 180,83"/>
+  <polygon fill="none" stroke="#FFC300" stroke-width="1.6" points="300,60 340,83 340,129 300,152 260,129 260,83"/>
+  <polygon fill="none" stroke="#FFC300" stroke-width="1.6" points="380,60 420,83 420,129 380,152 340,129 340,83"/>
+  <polygon fill="none" stroke="#FFC300" stroke-width="1.6" points="460,60 500,83 500,129 460,152 420,129 420,83"/>
+  <polygon fill="none" stroke="#FFC300" stroke-width="1.6" points="540,60 580,83 580,129 540,152 500,129 500,83"/>
+  <polygon fill="none" stroke="#FFC300" stroke-width="1.6" points="100,129 140,152 140,198 100,221  60,198  60,152"/>
+  <polygon fill="#FFC300" fill-opacity="0.1" stroke="#FFC300" stroke-width="1.6" points="180,129 220,152 220,198 180,221 140,198 140,152"/>
+  <polygon fill="none" stroke="#FFC300" stroke-width="1.6" points="260,129 300,152 300,198 260,221 220,198 220,152"/>
+  <polygon fill="#FFC300" fill-opacity="0.15" stroke="#FFC300" stroke-width="1.6" points="340,129 380,152 380,198 340,221 300,198 300,152"/>
+  <polygon fill="none" stroke="#FFC300" stroke-width="1.6" points="420,129 460,152 460,198 420,221 380,198 380,152"/>
+  <polygon fill="#FFC300" fill-opacity="0.1" stroke="#FFC300" stroke-width="1.6" points="500,129 540,152 540,198 500,221 460,198 460,152"/>
+  <polygon fill="none" stroke="#FFC300" stroke-width="1.6" points="580,129 620,152 620,198 580,221 540,198 540,152"/>
+  <polygon fill="none" stroke="#FFC300" stroke-width="1.6" points="140,198 180,221 180,267 140,290 100,267 100,221"/>
+  <polygon fill="none" stroke="#FFC300" stroke-width="1.6" points="220,198 260,221 260,267 220,290 180,267 180,221"/>
+  <polygon fill="#FFC300" fill-opacity="0.15" stroke="#FFC300" stroke-width="1.6" points="300,198 340,221 340,267 300,290 260,267 260,221"/>
+  <polygon fill="none" stroke="#FFC300" stroke-width="1.6" points="380,198 420,221 420,267 380,290 340,267 340,221"/>
+  <polygon fill="none" stroke="#FFC300" stroke-width="1.6" points="460,198 500,221 500,267 460,290 420,267 420,221"/>
+  <polygon fill="#FFC300" fill-opacity="0.1" stroke="#FFC300" stroke-width="1.6" points="540,198 580,221 580,267 540,290 500,267 500,221"/>
+  <polygon fill="#FFC300" fill-opacity="0.1" stroke="#FFC300" stroke-width="1.6" points="100,267 140,290 140,336 100,359  60,336  60,290"/>
+  <polygon fill="none" stroke="#FFC300" stroke-width="1.6" points="180,267 220,290 220,336 180,359 140,336 140,290"/>
+  <polygon fill="none" stroke="#FFC300" stroke-width="1.6" points="260,267 300,290 300,336 260,359 220,336 220,290"/>
+  <polygon fill="#FFC300" fill-opacity="0.15" stroke="#FFC300" stroke-width="1.6" points="340,267 380,290 380,336 340,359 300,336 300,290"/>
+  <polygon fill="none" stroke="#FFC300" stroke-width="1.6" points="420,267 460,290 460,336 420,359 380,336 380,290"/>
+  <polygon fill="none" stroke="#FFC300" stroke-width="1.6" points="500,267 540,290 540,336 500,359 460,336 460,290"/>
+  <polygon fill="#FFC300" fill-opacity="0.1" stroke="#FFC300" stroke-width="1.6" points="580,267 620,290 620,336 580,359 540,336 540,290"/>
+  <polygon fill="none" stroke="#FFC300" stroke-width="1.6" points="140,336 180,359 180,405 140,428 100,405 100,359"/>
+  <polygon fill="#FFC300" fill-opacity="0.15" stroke="#FFC300" stroke-width="1.6" points="220,336 260,359 260,405 220,428 180,405 180,359"/>
+  <polygon fill="none" stroke="#FFC300" stroke-width="1.6" points="300,336 340,359 340,405 300,428 260,405 260,359"/>
+  <polygon fill="none" stroke="#FFC300" stroke-width="1.6" points="380,336 420,359 420,405 380,428 340,405 340,359"/>
+  <polygon fill="#FFC300" fill-opacity="0.1" stroke="#FFC300" stroke-width="1.6" points="460,336 500,359 500,405 460,428 420,405 420,359"/>
+  <polygon fill="none" stroke="#FFC300" stroke-width="1.6" points="540,336 580,359 580,405 540,428 500,405 500,359"/>
+  <polygon fill="none" stroke="#FFC300" stroke-width="1.6" points="100,405 140,428 140,474 100,497  60,474  60,428"/>
+  <polygon fill="none" stroke="#FFC300" stroke-width="1.6" points="180,405 220,428 220,474 180,497 140,474 140,428"/>
+  <polygon fill="#FFC300" fill-opacity="0.1" stroke="#FFC300" stroke-width="1.6" points="260,405 300,428 300,474 260,497 220,474 220,428"/>
+  <polygon fill="none" stroke="#FFC300" stroke-width="1.6" points="340,405 380,428 380,474 340,497 300,474 300,428"/>
+  <polygon fill="#FFC300" fill-opacity="0.15" stroke="#FFC300" stroke-width="1.6" points="420,405 460,428 460,474 420,497 380,474 380,428"/>
+  <polygon fill="none" stroke="#FFC300" stroke-width="1.6" points="500,405 540,428 540,474 500,497 460,474 460,428"/>
+  <polygon fill="none" stroke="#FFC300" stroke-width="1.6" points="580,405 620,428 620,474 580,497 540,474 540,428"/>
+  <polygon fill="none" stroke="#FFC300" stroke-width="1.6" points="140,474 180,497 180,543 140,566 100,543 100,497"/>
+  <polygon fill="none" stroke="#FFC300" stroke-width="1.6" points="220,474 260,497 260,543 220,566 180,543 180,497"/>
+  <polygon fill="#FFC300" fill-opacity="0.1" stroke="#FFC300" stroke-width="1.6" points="300,474 340,497 340,543 300,566 260,543 260,497"/>
+  <polygon fill="none" stroke="#FFC300" stroke-width="1.6" points="380,474 420,497 420,543 380,566 340,543 340,497"/>
+  <polygon fill="none" stroke="#FFC300" stroke-width="1.6" points="460,474 500,497 500,543 460,566 420,543 420,497"/>
+  <polygon fill="#FFC300" fill-opacity="0.15" stroke="#FFC300" stroke-width="1.6" points="540,474 580,497 580,543 540,566 500,543 500,497"/>
+  <polygon fill="none" stroke="#FFC300" stroke-width="1.6" points="180,543 220,566 220,612 180,635 140,612 140,566"/>
+  <polygon fill="none" stroke="#FFC300" stroke-width="1.6" points="260,543 300,566 300,612 260,635 220,612 220,566"/>
+  <polygon fill="none" stroke="#FFC300" stroke-width="1.6" points="340,543 380,566 380,612 340,635 300,612 300,566"/>
+  <polygon fill="none" stroke="#FFC300" stroke-width="1.6" points="420,543 460,566 460,612 420,635 380,612 380,566"/>
+  <polygon fill="none" stroke="#FFC300" stroke-width="1.6" points="500,543 540,566 540,612 500,635 460,612 460,566"/>
+</g>
+<g clip-path="url(#bg)">
+  <g transform="translate(-223.85, 80.35) scale(1.4653)">
+    <path fill="#C85000"
+      d="M474.2,152.2h-32.8v49.5h32.8c13.7,0,24.9-11.3,24.9-24.9S487.9,152.2,474.2,152.2"/>
+    <path fill="#FFC300"
+      d="M280.7,177.1c0,38.2,31.1,69.3,69.3,69.3c38.2,0,69.3-31.1,69.3-69.3
+         s-31.1-69.3-69.3-69.3C311.8,107.8,280.7,138.9,280.7,177.1L280.7,177.1"/>
+    <circle cx="328" cy="155" r="21" fill="white" opacity="0.55"/>
+  </g>
+</g>
+<circle cx="340" cy="340" r="307" fill="none" stroke="#FFC300" stroke-width="1.5" opacity="0.3"/>
+</svg>
