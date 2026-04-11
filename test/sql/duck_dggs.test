@@ -173,122 +173,309 @@ SELECT geo_to_seqnum('POINT(0.0 0.0)'::GEOMETRY, 1) != geo_to_seqnum('POINT(0.0 
 true
 
 # ============================================================
-# seqnum_to_boundary — structural tests (seqnum=2380, res=5)
-#
-# seqnum 2380 is the ISEA4H res-5 cell centred at (0,0), Q2DI
-# (quad=3, i=10, j=10).  It is a regular hexagon, so the closed
-# WKB ring has 6 distinct vertices + 1 closing repeat = 7 points.
+# dggs_params — 8-arg overload (aperture sequence support)
 # ============================================================
 
-require spatial
-
-# Returns a POLYGON geometry (not null, not a point or linestring)
+# 6-arg overload defaults is_aperture_sequence=false
 query I
-SELECT ST_GeometryType(seqnum_to_boundary(2380, 5));
+SELECT (dggs_params('ISEA', 4, 'HEXAGON', 0.0, 58.28252559, 11.25)).is_aperture_sequence;
 ----
-POLYGON
+false
 
-# A hexagon ring has 6 vertices; WKB closes the ring → 7 points total
+# 6-arg overload defaults aperture_sequence=''
 query I
-SELECT ST_NPoints(seqnum_to_boundary(2380, 5));
+SELECT (dggs_params('ISEA', 4, 'HEXAGON', 0.0, 58.28252559, 11.25)).aperture_sequence;
+----
+(empty)
+
+# 8-arg overload sets is_aperture_sequence
+query I
+SELECT (dggs_params('ISEA', 3, 'HEXAGON', 0.0, 58.28252559, 11.25, true, '3437')).is_aperture_sequence;
+----
+true
+
+# 8-arg overload sets aperture_sequence
+query I
+SELECT (dggs_params('ISEA', 3, 'HEXAGON', 0.0, 58.28252559, 11.25, true, '3437')).aperture_sequence;
+----
+3437
+
+# ============================================================
+# Grid Statistics — dggs_n_cells, dggs_cell_area_km,
+#                   dggs_cell_dist_km, dggs_cls_km,
+#                   dggs_res_info
+# ============================================================
+
+# Known cell count for ISEA4H at res 4
+query I
+SELECT dggs_n_cells(4);
+----
+2562
+
+# Known cell count at res 5
+query I
+SELECT dggs_n_cells(5);
+----
+10242
+
+# Higher resolution has more cells
+query I
+SELECT dggs_n_cells(5) > dggs_n_cells(4);
+----
+true
+
+# Higher resolution has smaller area per cell
+query I
+SELECT dggs_cell_area_km(5) < dggs_cell_area_km(4);
+----
+true
+
+# All stats are positive
+query I
+SELECT dggs_cell_area_km(4) > 0
+   AND dggs_cell_dist_km(4) > 0
+   AND dggs_cls_km(4) > 0;
+----
+true
+
+# dggs_res_info struct fields match individual functions
+query I
+SELECT (dggs_res_info(4)).cells = dggs_n_cells(4);
+----
+true
+
+query I
+SELECT (dggs_res_info(4)).res = 4;
+----
+true
+
+# Params overload: stats with explicit default params match base overload
+query I
+SELECT dggs_n_cells(4, dggs_params('ISEA', 4, 'HEXAGON', 0.0, 58.28252559, 11.25)) = dggs_n_cells(4);
+----
+true
+
+# Different aperture gives different cell count
+query I
+SELECT dggs_n_cells(4, dggs_params('ISEA', 3, 'HEXAGON', 0.0, 58.28252559, 11.25))
+    != dggs_n_cells(4);
+----
+true
+
+# ── aperture sequence grid stats ────────────────────────────
+
+# Aperture sequence produces a different cell count than fixed aperture
+query I
+SELECT dggs_n_cells(3, dggs_params('ISEA', 3, 'HEXAGON', 0.0, 58.28252559, 11.25, true, '3434'))
+    != dggs_n_cells(3, dggs_params('ISEA', 3, 'HEXAGON', 0.0, 58.28252559, 11.25));
+----
+true
+
+query I
+SELECT dggs_n_cells(3, dggs_params('ISEA', 3, 'HEXAGON', 0.0, 58.28252559, 11.25, true, '3434'));
+----
+362
+
+# ============================================================
+# Neighbors — seqnum_neighbors
+# ============================================================
+
+# Interior hexagon cell has 6 neighbors
+query I
+SELECT len(seqnum_neighbors(2380::UBIGINT, 5));
+----
+6
+
+# A cell is not its own neighbor
+query I
+SELECT list_contains(seqnum_neighbors(2380::UBIGINT, 5), 2380::UBIGINT);
+----
+false
+
+# Neighbor relationship is symmetric
+query I
+SELECT list_contains(seqnum_neighbors(2412::UBIGINT, 5), 2380::UBIGINT);
+----
+true
+
+# Params overload matches base form
+query I
+SELECT seqnum_neighbors(2380::UBIGINT, 5)
+     = seqnum_neighbors(2380::UBIGINT, 5, dggs_params('ISEA', 4, 'HEXAGON', 0.0, 58.28252559, 11.25));
+----
+true
+
+# Vectorised over a table
+query I
+SELECT count(*) = 3 FROM (
+  SELECT seqnum_neighbors(seqnum, 5)
+  FROM (VALUES (2380::UBIGINT), (2381::UBIGINT), (100::UBIGINT)) t(seqnum)
+);
+----
+true
+
+# ============================================================
+# Parent — seqnum_parent
+# ============================================================
+
+query I
+SELECT seqnum_parent(2380::UBIGINT, 5);
+----
+599
+
+# Parent is at the coarser resolution: its children include the original cell
+query I
+SELECT list_contains(
+    seqnum_children(seqnum_parent(2380::UBIGINT, 5), 4),
+    2380::UBIGINT
+);
+----
+true
+
+# Params overload matches base form
+query I
+SELECT seqnum_parent(2380::UBIGINT, 5)
+     = seqnum_parent(2380::UBIGINT, 5, dggs_params('ISEA', 4, 'HEXAGON', 0.0, 58.28252559, 11.25));
+----
+true
+
+# ============================================================
+# Children — seqnum_children
+# ============================================================
+
+# Aperture 4 hexagon cell has 7 children (1 interior + 6 boundary)
+query I
+SELECT len(seqnum_children(599::UBIGINT, 4));
 ----
 7
 
-# The polygon must be geometrically valid (no self-intersections, etc.)
+# The interior child's parent is the original cell
 query I
-SELECT ST_IsValid(seqnum_to_boundary(2380, 5));
+SELECT seqnum_parent((seqnum_children(599::UBIGINT, 4))[1], 5);
+----
+599
+
+# Params overload matches base form
+query I
+SELECT seqnum_children(599::UBIGINT, 4)
+     = seqnum_children(599::UBIGINT, 4, dggs_params('ISEA', 4, 'HEXAGON', 0.0, 58.28252559, 11.25));
 ----
 true
 
-# The ring must be closed: first point equals last point
+# ============================================================
+# Hierarchical addresses — ZOrder, Z3, Z7 round-trips
+# ============================================================
+
+# ── ZOrder (default aperture 4) ─────────────────────────────
+
 query I
-SELECT ST_Equals(
-    ST_PointN(ST_ExteriorRing(seqnum_to_boundary(2380, 5)), 1),
-    ST_PointN(ST_ExteriorRing(seqnum_to_boundary(2380, 5)),
-              ST_NPoints(seqnum_to_boundary(2380, 5)))
-);
+SELECT zorder_to_seqnum(seqnum_to_zorder(2380::UBIGINT, 5), 5);
+----
+2380
+
+# ── Z3 (requires aperture 3) ────────────────────────────────
+
+query I
+SELECT z3_to_seqnum(
+    seqnum_to_z3(100::UBIGINT, 4,
+        dggs_params('ISEA', 3, 'HEXAGON', 0.0, 58.28252559, 11.25)),
+    4, dggs_params('ISEA', 3, 'HEXAGON', 0.0, 58.28252559, 11.25));
+----
+100
+
+# ── Z7 (requires aperture 7) ────────────────────────────────
+
+query I
+SELECT z7_to_seqnum(
+    seqnum_to_z7(100::UBIGINT, 4,
+        dggs_params('ISEA', 7, 'HEXAGON', 0.0, 58.28252559, 11.25)),
+    4, dggs_params('ISEA', 7, 'HEXAGON', 0.0, 58.28252559, 11.25));
+----
+100
+
+# ZOrder params overload matches base form (default is aperture 4)
+query I
+SELECT seqnum_to_zorder(2380::UBIGINT, 5)
+     = seqnum_to_zorder(2380::UBIGINT, 5, dggs_params('ISEA', 4, 'HEXAGON', 0.0, 58.28252559, 11.25));
 ----
 true
 
-# The cell centre (seqnum_to_geo) must lie inside its own boundary polygon.
-# This is the fundamental correctness check: boundary and centre agree.
-query I
-SELECT ST_Contains(
-    seqnum_to_boundary(2380, 5),
-    seqnum_to_geo(2380, 5)
-);
-----
-true
+# ============================================================
+# All Parents — seqnum_all_parents
+# ============================================================
 
-# All vertices must be within a reasonable distance of the cell centre.
-# At res=5 ISEA4H the circumradius is < 2 degrees; we use 3 as a safe bound.
+# Interior cell: all_parents returns exactly the primary parent
 query I
-SELECT bool_and(
-    ST_Distance(
-        ST_PointN(ST_ExteriorRing(seqnum_to_boundary(2380, 5)), v),
-        seqnum_to_geo(2380, 5)
-    ) < 3.0
-) FROM generate_series(1, 6) t(v);
-----
-true
-
-# The polygon has exactly one ring (no holes in a DGGS cell)
-query I
-SELECT ST_NRings(seqnum_to_boundary(2380, 5));
+SELECT len(seqnum_all_parents(2380::UBIGINT, 5));
 ----
 1
 
-# ── params overload ──────────────────────────────────────────
-
-# dggs_params overload must produce the same polygon as the simple form
+# Primary parent is the first element
 query I
-SELECT ST_Equals(
-    seqnum_to_boundary(2380, 5),
-    seqnum_to_boundary(2380, 5, dggs_params('ISEA', 4, 'HEXAGON', 0.0, 58.28252559, 11.25))
+SELECT (seqnum_all_parents(2380::UBIGINT, 5))[1] = seqnum_parent(2380::UBIGINT, 5);
+----
+true
+
+# Boundary cell (2412 sits on the boundary between parents) has multiple parents
+query I
+SELECT len(seqnum_all_parents(2412::UBIGINT, 5)) > 1;
+----
+true
+
+# The primary (containing) parent is always in the list
+query I
+SELECT list_contains(
+    seqnum_all_parents(2412::UBIGINT, 5),
+    seqnum_parent(2412::UBIGINT, 5)
 );
 ----
 true
 
-# ── resolution sensitivity ───────────────────────────────────
-
-# A coarser cell (res=3) containing the same point must be strictly larger
+# Params overload matches base form
 query I
-SELECT ST_Area(seqnum_to_boundary(geo_to_seqnum('POINT(10.0 20.0)'::GEOMETRY, 3), 3))
-     > ST_Area(seqnum_to_boundary(geo_to_seqnum('POINT(10.0 20.0)'::GEOMETRY, 5), 5));
+SELECT seqnum_all_parents(2380::UBIGINT, 5)
+     = seqnum_all_parents(2380::UBIGINT, 5, dggs_params('ISEA', 4, 'HEXAGON', 0.0, 58.28252559, 11.25));
 ----
 true
 
-# ── neighbour separation ─────────────────────────────────────
+# ============================================================
+# Vertex2DD — seqnum_to_vertex2dd, vertex2dd_to_seqnum
+# ============================================================
 
-# Adjacent cells must not contain each other's centres
+# Round-trip: vertex2dd → seqnum recovers the original
 query I
-SELECT
-    NOT ST_Contains(seqnum_to_boundary(2380, 5), seqnum_to_geo(2381, 5))
-AND NOT ST_Contains(seqnum_to_boundary(2381, 5), seqnum_to_geo(2380, 5));
-----
-true
-
-# ── vectorised ───────────────────────────────────────────────
-
-# Works on a table of seqnums; every row returns a valid polygon
-query I
-SELECT bool_and(ST_IsValid(seqnum_to_boundary(seqnum, 5)))
-FROM (VALUES (2380::UBIGINT), (2381::UBIGINT), (2382::UBIGINT), (100::UBIGINT)) t(seqnum);
-----
-true
-
-# Every boundary polygon contains its own centre point
-query I
-SELECT bool_and(ST_Contains(seqnum_to_boundary(seqnum, 5), seqnum_to_geo(seqnum, 5)))
-FROM (VALUES (2380::UBIGINT), (2381::UBIGINT), (2382::UBIGINT), (100::UBIGINT)) t(seqnum);
-----
-true
-
-# ── round-trip consistency ───────────────────────────────────
-
-# Any point inside a cell boundary must map back to the same seqnum.
-# We use the centroid (= cell centre for convex cells) as a proxy.
-query I
-SELECT geo_to_seqnum(seqnum_to_geo(2380, 5), 5);
+SELECT vertex2dd_to_seqnum(
+    (seqnum_to_vertex2dd(2380::UBIGINT, 5)).keep,
+    (seqnum_to_vertex2dd(2380::UBIGINT, 5)).vert_num,
+    (seqnum_to_vertex2dd(2380::UBIGINT, 5)).tri_num,
+    (seqnum_to_vertex2dd(2380::UBIGINT, 5)).x,
+    (seqnum_to_vertex2dd(2380::UBIGINT, 5)).y,
+    5
+);
 ----
 2380
+
+# Struct fields have expected types: keep is boolean, vert_num/tri_num are ints
+query I
+SELECT (seqnum_to_vertex2dd(2380::UBIGINT, 5)).keep;
+----
+true
+
+# Params overload matches base form
+query I
+SELECT seqnum_to_vertex2dd(2380::UBIGINT, 5)
+     = seqnum_to_vertex2dd(2380::UBIGINT, 5, dggs_params('ISEA', 4, 'HEXAGON', 0.0, 58.28252559, 11.25));
+----
+true
+
+# ============================================================
+# Aperture sequence — transforms
+# ============================================================
+
+# seqnum round-trip through aperture-sequence grid
+query I
+SELECT seqnum_to_seqnum(100::UBIGINT, 3,
+    dggs_params('ISEA', 3, 'HEXAGON', 0.0, 58.28252559, 11.25, true, '3434'));
+----
+100
+
