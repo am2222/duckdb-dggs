@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.1.4](https://github.com/am2222/duckdb-dggs/compare/v0.1.3...v0.1.4) (2026-04-11)
+
+
+### Features
+
+* Add DgZ3StringRF header inclusion for compatibility with MSVC ([e1c4889](https://github.com/am2222/duckdb-dggs/commit/e1c48897bc91f38304e8dd629d7759b29b99f629))
+* Add support for aperture sequences and enhance DGGS functionality ([ff4b767](https://github.com/am2222/duckdb-dggs/commit/ff4b767ba537554036ad05f6e9773444dabf991e))
+* Add VitePress configuration and SVG assets for documentation ([dca843d](https://github.com/am2222/duckdb-dggs/commit/dca843d50e9c0d94b357fb3739340c50f8b48074))
+* Enhance DGGS functionality with new transformation methods and extensive test coverage ([fe048cd](https://github.com/am2222/duckdb-dggs/commit/fe048cde59ff753d6973035511a21295d2d184b2))
+* Include DgZOrderStringRF header for MSVC compatibility ([a0ca21b](https://github.com/am2222/duckdb-dggs/commit/a0ca21bbb1bd949ee75ca8b1110e39312a6bd02b))
+* Update documentation and version to 0.1.4, add new grid statistics and neighbor functions ([cbf23ee](https://github.com/am2222/duckdb-dggs/commit/cbf23ee92ab30c804d6ffdb583558e4111d3b1bd))
+
+
+### Bug Fixes
+
+* Clean up code formatting and improve readability in dggrid_transform and duck_dggs_extension ([6bf7a14](https://github.com/am2222/duckdb-dggs/commit/6bf7a14b953766cdd0f578c91a582b1a48177ae4))
+* Improve code formatting in dggrid_transform.cpp for better readability ([7108754](https://github.com/am2222/duckdb-dggs/commit/710875432b6ba70b602629a11c9494e9dc424393))
+* Standardize include formatting in dggrid_transform.cpp for consistency ([5426c32](https://github.com/am2222/duckdb-dggs/commit/5426c324a22046726a8cf88a99dbc8d0b8f7a89d))
+
 ## [0.1.3](https://github.com/am2222/duckdb-dggs/compare/v0.1.2...v0.1.3) (2026-04-06)
 
 
