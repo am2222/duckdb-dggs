@@ -63,7 +63,7 @@
 #include <dglib/DgZOrderRF.h>  // DgZOrderRF, DgZOrderCoord
 #include <dglib/DgZ3RF.h>      // DgZ3RF, DgZ3Coord
 #include <dglib/DgZ7StringRF.h> // DgZ7StringRF, DgZ7StringCoord (must come before DgZ7RF.h for MSVC)
-#include <dglib/DgZ7RF.h>      // DgZ7RF, DgZ7Coord
+#include <dglib/DgZ7RF.h> // DgZ7RF, DgZ7Coord
 
 #include <algorithm>
 #include <cmath>
@@ -458,8 +458,7 @@ static std::shared_ptr<Transformer> getTransformer(const DggsParams &p) {
   static thread_local std::shared_ptr<Transformer> tl_last_result;
   static thread_local bool tl_valid = false;
 
-  if (tl_valid &&
-      p.res == tl_last_params.res &&
+  if (tl_valid && p.res == tl_last_params.res &&
       p.aperture == tl_last_params.aperture &&
       p.azimuth_deg == tl_last_params.azimuth_deg &&
       p.pole_lat_deg == tl_last_params.pole_lat_deg &&
