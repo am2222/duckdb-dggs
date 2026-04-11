@@ -52,17 +52,17 @@
 #include <dglib/DgBoundedIDGG.h> // DgBoundedIDGG (SEQNUM)
 #include <dglib/DgApSeq.h>       // DgApSeq (aperture sequence support)
 #include <dglib/DgProjTriRF.h>   // DgProjTriRF, DgProjTriCoord, DgPlaneTriRF
-#include <dglib/DgIDGGutil.h>    // DgQ2DDCoord, DgQ2DDRF, DgPlaneTriRF, DgVertex2DDRF
-#include <dglib/DgGridTopo.h>    // Hexagon, Triangle, Diamond, D4, D6
-#include <dglib/DgLocation.h>    // DgLocation
-#include <dglib/DgPolygon.h>     // DgPolygon / DgLocVector (cell boundary)
-#include <dglib/DgCell.h>        // DgCell
-#include <dglib/DgIVec2D.h>      // DgIVec2D (.i(), .j())
-#include <dglib/DgDVec2D.h>      // DgDVec2D (.x(), .y())
-#include <dglib/DgConstants.h>   // M_PIl, M_ZERO
-#include <dglib/DgZOrderRF.h>    // DgZOrderRF, DgZOrderCoord
-#include <dglib/DgZ3RF.h>        // DgZ3RF, DgZ3Coord
-#include <dglib/DgZ7RF.h>        // DgZ7RF, DgZ7Coord
+#include <dglib/DgIDGGutil.h> // DgQ2DDCoord, DgQ2DDRF, DgPlaneTriRF, DgVertex2DDRF
+#include <dglib/DgGridTopo.h>  // Hexagon, Triangle, Diamond, D4, D6
+#include <dglib/DgLocation.h>  // DgLocation
+#include <dglib/DgPolygon.h>   // DgPolygon / DgLocVector (cell boundary)
+#include <dglib/DgCell.h>      // DgCell
+#include <dglib/DgIVec2D.h>    // DgIVec2D (.i(), .j())
+#include <dglib/DgDVec2D.h>    // DgDVec2D (.x(), .y())
+#include <dglib/DgConstants.h> // M_PIl, M_ZERO
+#include <dglib/DgZOrderRF.h>  // DgZOrderRF, DgZOrderCoord
+#include <dglib/DgZ3RF.h>      // DgZ3RF, DgZ3Coord
+#include <dglib/DgZ7RF.h>      // DgZ7RF, DgZ7Coord
 
 #include <algorithm>
 #include <cmath>
@@ -348,8 +348,8 @@ static std::shared_ptr<Transformer> buildTransformer(const DggsParams &p) {
           "Aperture sequences are only supported for HEXAGON topology, got " +
           p.topology);
     if (p.aperture_sequence.empty())
-      throw std::invalid_argument(
-          "aperture_sequence cannot be empty when is_aperture_sequence is true");
+      throw std::invalid_argument("aperture_sequence cannot be empty when "
+                                  "is_aperture_sequence is true");
     for (char c : p.aperture_sequence) {
       if (c != '3' && c != '4' && c != '7')
         throw std::invalid_argument(
@@ -357,10 +357,9 @@ static std::shared_ptr<Transformer> buildTransformer(const DggsParams &p) {
             std::string(1, c) + "'. Only '3', '4', and '7' are allowed.");
     }
     if (p.res > static_cast<int>(p.aperture_sequence.length()))
-      throw std::invalid_argument(
-          "Resolution " + std::to_string(p.res) +
-          " exceeds aperture sequence length " +
-          std::to_string(p.aperture_sequence.length()));
+      throw std::invalid_argument("Resolution " + std::to_string(p.res) +
+                                  " exceeds aperture sequence length " +
+                                  std::to_string(p.aperture_sequence.length()));
   }
 
   auto t = std::make_shared<Transformer>();
@@ -398,25 +397,23 @@ static std::shared_ptr<Transformer> buildTransformer(const DggsParams &p) {
 
   if (p.is_aperture_sequence) {
     DgApSeq apSeq(p.aperture_sequence, "CustomApSeq");
-    idggs = DgHexIDGGS::makeRF(net, *t->geoRF, vert0, azDegs, p.aperture,
-                                nRes, "HexIDGGS", p.projection, apSeq,
-                                true,  // isApSeq = true
-                                false, // isMixed43
-                                0,     // numAp4
-                                false  // isSuperfund
+    idggs = DgHexIDGGS::makeRF(net, *t->geoRF, vert0, azDegs, p.aperture, nRes,
+                               "HexIDGGS", p.projection, apSeq,
+                               true,  // isApSeq = true
+                               false, // isMixed43
+                               0,     // numAp4
+                               false  // isSuperfund
     );
   } else {
     idggs = DgIDGGS::makeRF(net, *t->geoRF, vert0, azDegs, p.aperture, nRes,
-                             topo, metric, "IDGGS", p.projection);
+                            topo, metric, "IDGGS", p.projection);
   }
 
   if (!idggs)
     throw std::runtime_error(
         "makeRF returned null for " + p.projection + "/" + p.topology +
         " aperture=" + std::to_string(p.aperture) +
-        (p.is_aperture_sequence
-             ? " sequence=" + p.aperture_sequence
-             : ""));
+        (p.is_aperture_sequence ? " sequence=" + p.aperture_sequence : ""));
 
   t->idggs = idggs;
 
@@ -450,10 +447,10 @@ static std::shared_ptr<Transformer> buildTransformer(const DggsParams &p) {
 //    threads race on the same key.
 // ---------------------------------------------------------------------------
 static std::shared_ptr<Transformer> getTransformer(const DggsParams &p) {
-  CacheKey key{p.projection,           p.aperture,
-               p.topology,             p.res,
-               p.azimuth_deg,          p.pole_lat_deg,
-               p.pole_lon_deg,         p.is_aperture_sequence,
+  CacheKey key{p.projection,       p.aperture,
+               p.topology,         p.res,
+               p.azimuth_deg,      p.pole_lat_deg,
+               p.pole_lon_deg,     p.is_aperture_sequence,
                p.aperture_sequence};
   {
     std::shared_lock<std::shared_mutex> rl(s_mutex);
@@ -529,9 +526,9 @@ ResInfo getResAt(const DggsParams &p, int res) {
   if (p.is_aperture_sequence && !p.aperture_sequence.empty()) {
     maxRes = static_cast<int>(p.aperture_sequence.length());
     if (res > maxRes)
-      throw std::invalid_argument(
-          "Resolution " + std::to_string(res) +
-          " exceeds aperture sequence length " + std::to_string(maxRes));
+      throw std::invalid_argument("Resolution " + std::to_string(res) +
+                                  " exceeds aperture sequence length " +
+                                  std::to_string(maxRes));
   }
 
   DggsParams full = p;
@@ -874,8 +871,7 @@ std::vector<SeqNum> seqNumNeighbors(const DggsParams &p, SeqNum seqnum) {
   result.reserve(static_cast<std::size_t>(neighbors.size()));
   for (int i = 0; i < neighbors.size(); i++) {
     const DgQ2DICoord *q2di = t->dgg->getAddress(neighbors[i]);
-    result.push_back(
-        static_cast<SeqNum>(t->bndRF->seqNumAddress(*q2di)));
+    result.push_back(static_cast<SeqNum>(t->bndRF->seqNumAddress(*q2di)));
   }
   return result;
 }

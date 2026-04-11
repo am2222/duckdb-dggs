@@ -271,8 +271,7 @@ struct ParamsReader {
     p.pole_lat_deg = plat_data[plat_fmt.sel->get_index(i)];
     p.pole_lon_deg = plon_data[plon_fmt.sel->get_index(i)];
     p.is_aperture_sequence = is_apseq_data[is_apseq_fmt.sel->get_index(i)];
-    p.aperture_sequence =
-        apseq_data[apseq_fmt.sel->get_index(i)].GetString();
+    p.aperture_sequence = apseq_data[apseq_fmt.sel->get_index(i)].GetString();
     return p;
   }
 };
@@ -1170,7 +1169,7 @@ static void DggsClsKMFun(DataChunk &args, ExpressionState &, Vector &result) {
     out[i] = dggrid::getResAt(paramsWithRes(res[i]), res[i]).cls_km;
 }
 static void DggsClsKMParamsFun(DataChunk &args, ExpressionState &,
-                                Vector &result) {
+                               Vector &result) {
   idx_t n = args.size();
   ArgReader<int32_t> res(args, 0, n);
   ParamsReader params(args.data[1], n);
@@ -1565,7 +1564,7 @@ static void Vertex2DDToSeqNumFun(DataChunk &args, ExpressionState &,
   auto *out = FlatVector::GetData<uint64_t>(result);
   for (idx_t i = 0; i < n; i++)
     out[i] = dggrid::vertex2DDToSeqNum(paramsWithRes(res[i]), keep[i],
-                                        vert_num[i], tri_num[i], x[i], y[i]);
+                                       vert_num[i], tri_num[i], x[i], y[i]);
 }
 static void Vertex2DDToSeqNumParamsFun(DataChunk &args, ExpressionState &,
                                        Vector &result) {
@@ -1581,7 +1580,7 @@ static void Vertex2DDToSeqNumParamsFun(DataChunk &args, ExpressionState &,
     auto p = params[i];
     p.res = res[i];
     out[i] = dggrid::vertex2DDToSeqNum(p, keep[i], vert_num[i], tri_num[i],
-                                        x[i], y[i]);
+                                       x[i], y[i]);
   }
 }
 
@@ -1600,17 +1599,17 @@ static void LoadInternal(ExtensionLoader &loader) {
     const auto BI = LogicalType::BOOLEAN;
     ScalarFunctionSet params_set("dggs_params");
     // 6-arg overload (backward compatible)
-    params_set.AddFunction(ScalarFunction(
-        "dggs_params",
-        {V, LogicalType::INTEGER, V, LogicalType::DOUBLE, LogicalType::DOUBLE,
-         LogicalType::DOUBLE},
-        PARAMS, DggsParamsFun));
+    params_set.AddFunction(
+        ScalarFunction("dggs_params",
+                       {V, LogicalType::INTEGER, V, LogicalType::DOUBLE,
+                        LogicalType::DOUBLE, LogicalType::DOUBLE},
+                       PARAMS, DggsParamsFun));
     // 8-arg overload (with aperture sequence)
-    params_set.AddFunction(ScalarFunction(
-        "dggs_params",
-        {V, LogicalType::INTEGER, V, LogicalType::DOUBLE, LogicalType::DOUBLE,
-         LogicalType::DOUBLE, BI, V},
-        PARAMS, DggsParamsApSeqFun));
+    params_set.AddFunction(
+        ScalarFunction("dggs_params",
+                       {V, LogicalType::INTEGER, V, LogicalType::DOUBLE,
+                        LogicalType::DOUBLE, LogicalType::DOUBLE, BI, V},
+                       PARAMS, DggsParamsApSeqFun));
     loader.RegisterFunction(params_set);
   }
 
@@ -1724,8 +1723,8 @@ static void LoadInternal(ExtensionLoader &loader) {
     const auto BO = LogicalType::BOOLEAN;
     reg("seqnum_to_vertex2dd", {UB, I}, VERTEX2DD, SeqNumToVertex2DDFun,
         SeqNumToVertex2DDParamsFun);
-    reg("vertex2dd_to_seqnum", {BO, I, I, D, D, I}, UB,
-        Vertex2DDToSeqNumFun, Vertex2DDToSeqNumParamsFun);
+    reg("vertex2dd_to_seqnum", {BO, I, I, D, D, I}, UB, Vertex2DDToSeqNumFun,
+        Vertex2DDToSeqNumParamsFun);
   }
   reg("seqnum_to_zorder", {UB, I}, UB, SeqNumToZOrderFun,
       SeqNumToZOrderParamsFun);
