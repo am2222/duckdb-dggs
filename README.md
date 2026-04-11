@@ -3,6 +3,7 @@
   <h1>duck_dggs</h1>
   <p>A DuckDB extension for discrete global grid systems (DGGS) powered by <a href="https://github.com/sahrk/DGGRID">DGGRID v8</a>.<br/>
   Transforms geographic coordinates to and from DGGS cell identifiers across multiple coordinate reference frames.</p>
+  <p><strong><a href="https://am2222.github.io/duckdb-dggs/">Documentation</a></strong></p>
 </div>
 
 ---
