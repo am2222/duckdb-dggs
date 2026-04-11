@@ -173,6 +173,105 @@ SELECT geo_to_seqnum('POINT(0.0 0.0)'::GEOMETRY, 1) != geo_to_seqnum('POINT(0.0 
 true
 
 # ============================================================
+# FROM Q2DD — (quad=3, x=0.15625, y=0.27063293868263705, res=5)
+# ============================================================
+
+query I
+SELECT q2dd_to_seqnum(3, 0.15625, 0.27063293868263705, 5);
+----
+2380
+
+query I
+SELECT q2dd_to_q2di(3, 0.15625, 0.27063293868263705, 5);
+----
+{'quad': 3, 'i': 10, 'j': 10}
+
+query I
+SELECT (q2dd_to_projtri(3, 0.15625, 0.27063293868263705, 5)).tnum = 7;
+----
+true
+
+# q2dd_to_geo produces the same cell centre as the canonical seqnum
+query I
+SELECT geo_to_seqnum(q2dd_to_geo(3, 0.15625, 0.27063293868263705, 5), 5);
+----
+2380
+
+# ============================================================
+# FROM PROJTRI — (tnum=7, x=0.6875, y=0.0, res=5)
+# ============================================================
+
+query I
+SELECT projtri_to_seqnum(7, 0.6875, 0.0, 5);
+----
+2380
+
+query I
+SELECT projtri_to_q2di(7, 0.6875, 0.0, 5);
+----
+{'quad': 3, 'i': 10, 'j': 10}
+
+query I
+SELECT abs((projtri_to_plane(7, 0.6875, 0.0, 5)).x - 2.3125) < 1e-9
+   AND abs((projtri_to_plane(7, 0.6875, 0.0, 5)).y - 1.7320508075688772) < 1e-9;
+----
+true
+
+# projtri_to_geo produces the same cell centre as the canonical seqnum
+query I
+SELECT geo_to_seqnum(projtri_to_geo(7, 0.6875, 0.0, 5), 5);
+----
+2380
+
+query I
+SELECT (projtri_to_q2dd(7, 0.6875, 0.0, 5)).quad = 3;
+----
+true
+
+# ============================================================
+# Cross-frame round-trips
+# ============================================================
+
+# GEO → Q2DI → SEQNUM matches GEO → SEQNUM
+query I
+SELECT q2di_to_seqnum(
+    (geo_to_q2di('POINT(10.0 20.0)'::GEOMETRY, 5)).quad,
+    (geo_to_q2di('POINT(10.0 20.0)'::GEOMETRY, 5)).i,
+    (geo_to_q2di('POINT(10.0 20.0)'::GEOMETRY, 5)).j, 5)
+  = geo_to_seqnum('POINT(10.0 20.0)'::GEOMETRY, 5);
+----
+true
+
+# GEO → Q2DD → SEQNUM matches GEO → SEQNUM
+query I
+SELECT q2dd_to_seqnum(
+    (geo_to_q2dd('POINT(10.0 20.0)'::GEOMETRY, 5)).quad,
+    (geo_to_q2dd('POINT(10.0 20.0)'::GEOMETRY, 5)).x,
+    (geo_to_q2dd('POINT(10.0 20.0)'::GEOMETRY, 5)).y, 5)
+  = geo_to_seqnum('POINT(10.0 20.0)'::GEOMETRY, 5);
+----
+true
+
+# GEO → PROJTRI → Q2DI → SEQNUM matches GEO → SEQNUM
+query I
+SELECT q2di_to_seqnum(
+    (projtri_to_q2di(
+        (geo_to_projtri('POINT(10.0 20.0)'::GEOMETRY, 5)).tnum,
+        (geo_to_projtri('POINT(10.0 20.0)'::GEOMETRY, 5)).x,
+        (geo_to_projtri('POINT(10.0 20.0)'::GEOMETRY, 5)).y, 5)).quad,
+    (projtri_to_q2di(
+        (geo_to_projtri('POINT(10.0 20.0)'::GEOMETRY, 5)).tnum,
+        (geo_to_projtri('POINT(10.0 20.0)'::GEOMETRY, 5)).x,
+        (geo_to_projtri('POINT(10.0 20.0)'::GEOMETRY, 5)).y, 5)).i,
+    (projtri_to_q2di(
+        (geo_to_projtri('POINT(10.0 20.0)'::GEOMETRY, 5)).tnum,
+        (geo_to_projtri('POINT(10.0 20.0)'::GEOMETRY, 5)).x,
+        (geo_to_projtri('POINT(10.0 20.0)'::GEOMETRY, 5)).y, 5)).j,
+    5) = geo_to_seqnum('POINT(10.0 20.0)'::GEOMETRY, 5);
+----
+true
+
+# ============================================================
 # dggs_params — 8-arg overload (aperture sequence support)
 # ============================================================
 
@@ -478,4 +577,269 @@ SELECT seqnum_to_seqnum(100::UBIGINT, 3,
     dggs_params('ISEA', 3, 'HEXAGON', 0.0, 58.28252559, 11.25, true, '3434'));
 ----
 100
+
+# ============================================================
+# Grid Statistics — exact values at res 1
+# ============================================================
+
+query I
+SELECT abs(dggs_cell_area_km(1) - 12751640.543102216) < 1.0;
+----
+true
+
+query I
+SELECT abs(dggs_cell_dist_km(1) - 3526.826215705416) < 0.01;
+----
+true
+
+query I
+SELECT abs(dggs_cls_km(1) - 4046.359550783672) < 0.01;
+----
+true
+
+# ============================================================
+# Error cases
+# ============================================================
+
+# seqnum_parent at resolution 0 throws error
+statement error
+SELECT seqnum_parent(1::UBIGINT, 0);
+----
+already at resolution 0
+
+# seqnum_to_zorder with aperture 7 throws error
+statement error
+SELECT seqnum_to_zorder(1::UBIGINT, 4, dggs_params('ISEA', 7, 'HEXAGON', 0.0, 58.28252559, 11.25));
+----
+ZORDER not available
+
+# seqnum_to_z3 with default aperture 4 throws error
+statement error
+SELECT seqnum_to_z3(1::UBIGINT, 4);
+----
+Z3 not available
+
+# seqnum_to_z7 with default aperture 4 throws error
+statement error
+SELECT seqnum_to_z7(1::UBIGINT, 4);
+----
+Z7 not available
+
+# ============================================================
+# Parent / Child — additional tests
+# ============================================================
+
+# Interior child's parent matches the original cell
+query I
+SELECT seqnum_parent((seqnum_children(599::UBIGINT, 4))[1], 5) = 599;
+----
+true
+
+# Children count: aperture 3 hex cell also has 7 children
+query I
+SELECT len(seqnum_children(10::UBIGINT, 3,
+    dggs_params('ISEA', 3, 'HEXAGON', 0.0, 58.28252559, 11.25)));
+----
+7
+
+# Children count: aperture 7 hex cell has 13 children
+query I
+SELECT len(seqnum_children(10::UBIGINT, 3,
+    dggs_params('ISEA', 7, 'HEXAGON', 0.0, 58.28252559, 11.25)));
+----
+13
+
+# ============================================================
+# Hierarchical addresses — additional tests
+# ============================================================
+
+# VERTEX2DD round-trip with aperture 3
+query I
+SELECT vertex2dd_to_seqnum(
+    (seqnum_to_vertex2dd(100::UBIGINT, 4, dggs_params('ISEA', 3, 'HEXAGON', 0.0, 58.28252559, 11.25))).keep,
+    (seqnum_to_vertex2dd(100::UBIGINT, 4, dggs_params('ISEA', 3, 'HEXAGON', 0.0, 58.28252559, 11.25))).vert_num,
+    (seqnum_to_vertex2dd(100::UBIGINT, 4, dggs_params('ISEA', 3, 'HEXAGON', 0.0, 58.28252559, 11.25))).tri_num,
+    (seqnum_to_vertex2dd(100::UBIGINT, 4, dggs_params('ISEA', 3, 'HEXAGON', 0.0, 58.28252559, 11.25))).x,
+    (seqnum_to_vertex2dd(100::UBIGINT, 4, dggs_params('ISEA', 3, 'HEXAGON', 0.0, 58.28252559, 11.25))).y,
+    4, dggs_params('ISEA', 3, 'HEXAGON', 0.0, 58.28252559, 11.25));
+----
+100
+
+# ZORDER uniqueness: different seqnums give different zorder values
+query I
+SELECT count(DISTINCT seqnum_to_zorder(s::UBIGINT, 5)) = 3
+FROM (VALUES (100), (200), (300)) t(s);
+----
+true
+
+# Z3 error for aperture 7
+statement error
+SELECT seqnum_to_z3(1::UBIGINT, 4, dggs_params('ISEA', 7, 'HEXAGON', 0.0, 58.28252559, 11.25));
+----
+Z3 not available
+
+# Z7 error for aperture 3
+statement error
+SELECT seqnum_to_z7(1::UBIGINT, 4, dggs_params('ISEA', 3, 'HEXAGON', 0.0, 58.28252559, 11.25));
+----
+Z7 not available
+
+# ============================================================
+# Multi-Aperture — additional tests
+# ============================================================
+
+# cellAreaKM decreases with higher resolution
+query I
+SELECT dggs_cell_area_km(1, dggs_params('ISEA', 3, 'HEXAGON', 0.0, 58.28252559, 11.25, true, '3434'))
+     > dggs_cell_area_km(2, dggs_params('ISEA', 3, 'HEXAGON', 0.0, 58.28252559, 11.25, true, '3434'));
+----
+true
+
+# cellDistKM decreases with higher resolution
+query I
+SELECT dggs_cell_dist_km(1, dggs_params('ISEA', 3, 'HEXAGON', 0.0, 58.28252559, 11.25, true, '3434'))
+     > dggs_cell_dist_km(2, dggs_params('ISEA', 3, 'HEXAGON', 0.0, 58.28252559, 11.25, true, '3434'));
+----
+true
+
+# Single aperture 4 matches multi-aperture '4444'
+query I
+SELECT dggs_n_cells(3, dggs_params('ISEA', 4, 'HEXAGON', 0.0, 58.28252559, 11.25))
+     = dggs_n_cells(3, dggs_params('ISEA', 4, 'HEXAGON', 0.0, 58.28252559, 11.25, true, '4444'));
+----
+true
+
+# Resolution 0 with aperture sequence returns 12 (icosahedron vertices + face centres)
+query I
+SELECT dggs_n_cells(0, dggs_params('ISEA', 3, 'HEXAGON', 0.0, 58.28252559, 11.25, true, '3434'));
+----
+12
+
+# FULLER projection works with aperture sequence
+query I
+SELECT dggs_n_cells(2, dggs_params('FULLER', 3, 'HEXAGON', 0.0, 58.28252559, 11.25, true, '343'));
+----
+122
+
+# Different pole coordinates work with aperture sequence
+query I
+SELECT dggs_n_cells(2, dggs_params('ISEA', 3, 'HEXAGON', 0.0, 45.0, 0.0, true, '343'));
+----
+122
+
+# Different azimuth works with aperture sequence
+query I
+SELECT dggs_n_cells(2, dggs_params('ISEA', 3, 'HEXAGON', 30.0, 58.28252559, 11.25, true, '343'));
+----
+122
+
+# geoToSequenceNum works with aperture sequence
+query I
+SELECT geo_to_seqnum('POINT(10.0 20.0)'::GEOMETRY, 2,
+    dggs_params('ISEA', 3, 'HEXAGON', 0.0, 58.28252559, 11.25, true, '343')) > 0;
+----
+true
+
+# sequenceNumToGeo round-trip with aperture sequence
+query I
+SELECT geo_to_seqnum(
+    seqnum_to_geo(10::UBIGINT, 2, dggs_params('ISEA', 3, 'HEXAGON', 0.0, 58.28252559, 11.25, true, '343')),
+    2, dggs_params('ISEA', 3, 'HEXAGON', 0.0, 58.28252559, 11.25, true, '343'));
+----
+10
+
+# ============================================================
+# Grid Statistics — specific known values (from geo.test.ts)
+# ============================================================
+
+query I
+SELECT dggs_n_cells(1);
+----
+42
+
+query I
+SELECT dggs_n_cells(3);
+----
+642
+
+# ============================================================
+# Neighbors — Triangle topology error
+# ============================================================
+
+statement error
+SELECT seqnum_neighbors(1::UBIGINT, 3, dggs_params('ISEA', 4, 'TRIANGLE', 0.0, 58.28252559, 11.25));
+----
+Neighbors not implemented for Triangle grids
+
+# ============================================================
+# Hierarchical addresses — consistency & edge cases
+# ============================================================
+
+# VERTEX2DD round-trip for multiple cells
+query I
+SELECT bool_and(
+    vertex2dd_to_seqnum(
+        (seqnum_to_vertex2dd(s::UBIGINT, 5)).keep,
+        (seqnum_to_vertex2dd(s::UBIGINT, 5)).vert_num,
+        (seqnum_to_vertex2dd(s::UBIGINT, 5)).tri_num,
+        (seqnum_to_vertex2dd(s::UBIGINT, 5)).x,
+        (seqnum_to_vertex2dd(s::UBIGINT, 5)).y, 5) = s::UBIGINT
+) FROM (VALUES (10), (20), (30), (40), (50)) t(s);
+----
+true
+
+# Z3 consistency across resolutions 3-6
+query I
+SELECT bool_and(
+    z3_to_seqnum(seqnum_to_z3(10::UBIGINT, r,
+        dggs_params('ISEA', 3, 'HEXAGON', 0.0, 58.28252559, 11.25)),
+        r, dggs_params('ISEA', 3, 'HEXAGON', 0.0, 58.28252559, 11.25)) = 10
+) FROM (VALUES (3), (4), (5), (6)) t(r);
+----
+true
+
+# Z7 consistency across resolutions 3-6
+query I
+SELECT bool_and(
+    z7_to_seqnum(seqnum_to_z7(10::UBIGINT, r,
+        dggs_params('ISEA', 7, 'HEXAGON', 0.0, 58.28252559, 11.25)),
+        r, dggs_params('ISEA', 7, 'HEXAGON', 0.0, 58.28252559, 11.25)) = 10
+) FROM (VALUES (3), (4), (5), (6)) t(r);
+----
+true
+
+# Z7 handles large seqnum values correctly
+query I
+SELECT z7_to_seqnum(seqnum_to_z7(1000000::UBIGINT, 8,
+    dggs_params('ISEA', 7, 'HEXAGON', 0.0, 58.28252559, 11.25)),
+    8, dggs_params('ISEA', 7, 'HEXAGON', 0.0, 58.28252559, 11.25));
+----
+1000000
+
+# All hierarchical types work together (aperture 3, seqnum 50)
+query I
+SELECT seqnum_to_zorder(50::UBIGINT, 4, dggs_params('ISEA', 3, 'HEXAGON', 0.0, 58.28252559, 11.25)) > 0
+   AND seqnum_to_z3(50::UBIGINT, 4, dggs_params('ISEA', 3, 'HEXAGON', 0.0, 58.28252559, 11.25)) > 0
+   AND (seqnum_to_vertex2dd(50::UBIGINT, 4, dggs_params('ISEA', 3, 'HEXAGON', 0.0, 58.28252559, 11.25))).keep IS NOT NULL;
+----
+true
+
+# ============================================================
+# Multi-Aperture — additional edge cases
+# ============================================================
+
+# Long aperture sequences work
+query I
+SELECT dggs_n_cells(10, dggs_params('ISEA', 3, 'HEXAGON', 0.0, 58.28252559, 11.25, true, '3477437743774377')) > 0;
+----
+true
+
+# Aperture 7 differs from aperture 4 and has more cells
+query I
+SELECT dggs_n_cells(4, dggs_params('ISEA', 7, 'HEXAGON', 0.0, 58.28252559, 11.25))
+    != dggs_n_cells(4)
+   AND dggs_n_cells(4, dggs_params('ISEA', 7, 'HEXAGON', 0.0, 58.28252559, 11.25))
+     > dggs_n_cells(4);
+----
+true
 

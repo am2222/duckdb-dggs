@@ -62,6 +62,7 @@
 #include <dglib/DgConstants.h> // M_PIl, M_ZERO
 #include <dglib/DgZOrderRF.h>  // DgZOrderRF, DgZOrderCoord
 #include <dglib/DgZ3RF.h>      // DgZ3RF, DgZ3Coord
+#include <dglib/DgZ7StringRF.h> // DgZ7StringRF, DgZ7StringCoord (must come before DgZ7RF.h for MSVC)
 #include <dglib/DgZ7RF.h>      // DgZ7RF, DgZ7Coord
 
 #include <algorithm>
@@ -440,33 +441,68 @@ static std::shared_ptr<Transformer> buildTransformer(const DggsParams &p) {
 // getTransformer — returns a cached Transformer; builds on first call.
 //
 // Locking strategy:
-//  • shared_lock for fast-path cache reads (multiple threads can read in
-//    parallel without blocking each other).
-//  • unique_lock for the write path; re-checks the cache under the write
-//    lock (double-checked locking) to avoid duplicate builds when two
-//    threads race on the same key.
+//  • Thread-local single-entry cache for the fast path: when consecutive
+//    calls on the same thread use the same params (the overwhelmingly
+//    common case — every row in a DuckDB DataChunk), we return immediately
+//    without constructing a CacheKey, computing a hash, or taking any lock.
+//  • shared_lock for the global cache read path.
+//  • unique_lock for the write path; re-checks under the write lock
+//    (double-checked locking) to avoid duplicate builds when two threads
+//    race on the same key.
 // ---------------------------------------------------------------------------
 static std::shared_ptr<Transformer> getTransformer(const DggsParams &p) {
+  // ── Thread-local fast path ─────────────────────────────────────────────
+  // Avoids CacheKey construction, hashing, locking, and atomic refcount
+  // when the same params are used repeatedly (typical: all rows in a chunk).
+  static thread_local DggsParams tl_last_params{};
+  static thread_local std::shared_ptr<Transformer> tl_last_result;
+  static thread_local bool tl_valid = false;
+
+  if (tl_valid &&
+      p.res == tl_last_params.res &&
+      p.aperture == tl_last_params.aperture &&
+      p.azimuth_deg == tl_last_params.azimuth_deg &&
+      p.pole_lat_deg == tl_last_params.pole_lat_deg &&
+      p.pole_lon_deg == tl_last_params.pole_lon_deg &&
+      p.is_aperture_sequence == tl_last_params.is_aperture_sequence &&
+      p.projection == tl_last_params.projection &&
+      p.topology == tl_last_params.topology &&
+      p.aperture_sequence == tl_last_params.aperture_sequence) {
+    return tl_last_result;
+  }
+
+  // ── Global cache lookup ────────────────────────────────────────────────
   CacheKey key{p.projection,       p.aperture,
                p.topology,         p.res,
                p.azimuth_deg,      p.pole_lat_deg,
                p.pole_lon_deg,     p.is_aperture_sequence,
                p.aperture_sequence};
+  std::shared_ptr<Transformer> result;
   {
     std::shared_lock<std::shared_mutex> rl(s_mutex);
     auto it = s_cache.find(key);
-    if (it != s_cache.end())
-      return it->second;
+    if (it != s_cache.end()) {
+      result = it->second;
+    }
   }
-  // Cache miss — build under exclusive lock with double-check to prevent
-  // duplicate construction by racing threads.
-  std::unique_lock<std::shared_mutex> wl(s_mutex);
-  auto it = s_cache.find(key);
-  if (it != s_cache.end())
-    return it->second;
-  auto t = buildTransformer(p);
-  auto [ins, _] = s_cache.emplace(key, std::move(t));
-  return ins->second;
+
+  if (!result) {
+    // Cache miss — build under exclusive lock with double-check.
+    std::unique_lock<std::shared_mutex> wl(s_mutex);
+    auto it = s_cache.find(key);
+    if (it != s_cache.end()) {
+      result = it->second;
+    } else {
+      result = buildTransformer(p);
+      s_cache.emplace(std::move(key), result);
+    }
+  }
+
+  // Update thread-local cache
+  tl_last_params = p;
+  tl_last_result = result;
+  tl_valid = true;
+  return result;
 }
 
 // ===========================================================================
@@ -931,10 +967,9 @@ std::vector<SeqNum> seqNumAllParents(const DggsParams &p, SeqNum seqnum) {
 }
 
 std::vector<SeqNum> seqNumChildren(const DggsParams &p, SeqNum seqnum) {
-  // Need res+1 to exist
+  // Build the IDGGS with res+1 so the child resolution exists.
   DggsParams p_with_children = p;
-  if (p.res < 10)
-    p_with_children.res = p.res + 1;
+  p_with_children.res = p.res + 1;
   auto t = getTransformer(p_with_children);
 
   const DgIDGGBase &parent_dgg = t->idggs->idggBase(p.res);
