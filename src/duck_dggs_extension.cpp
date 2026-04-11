@@ -13,6 +13,9 @@
 #else
 #include "duckdb/common/types/vector.hpp"
 #endif
+#if __has_include("duckdb/common/vector/list_vector.hpp")
+#include "duckdb/common/vector/list_vector.hpp"
+#endif
 #include <duckdb/parser/parsed_data/create_scalar_function_info.hpp>
 #include <dglib/DgBase.h>
 
@@ -78,7 +81,8 @@ static LogicalType Q2DIType() {
 }
 
 // STRUCT(projection VARCHAR, aperture INTEGER, topology VARCHAR,
-//        azimuth_deg DOUBLE, pole_lat_deg DOUBLE, pole_lon_deg DOUBLE)
+//        azimuth_deg DOUBLE, pole_lat_deg DOUBLE, pole_lon_deg DOUBLE,
+//        is_aperture_sequence BOOLEAN, aperture_sequence VARCHAR)
 static LogicalType DggsParamsType() {
   child_list_t<LogicalType> c;
   c.push_back({"projection", LogicalType::VARCHAR});
@@ -87,7 +91,49 @@ static LogicalType DggsParamsType() {
   c.push_back({"azimuth_deg", LogicalType::DOUBLE});
   c.push_back({"pole_lat_deg", LogicalType::DOUBLE});
   c.push_back({"pole_lon_deg", LogicalType::DOUBLE});
+  c.push_back({"is_aperture_sequence", LogicalType::BOOLEAN});
+  c.push_back({"aperture_sequence", LogicalType::VARCHAR});
   return LogicalType::STRUCT(c);
+}
+
+static LogicalType ResInfoType() {
+  child_list_t<LogicalType> c;
+  c.push_back({"res", LogicalType::INTEGER});
+  c.push_back({"cells", LogicalType::UBIGINT});
+  c.push_back({"area_km", LogicalType::DOUBLE});
+  c.push_back({"spacing_km", LogicalType::DOUBLE});
+  c.push_back({"cls_km", LogicalType::DOUBLE});
+  return LogicalType::STRUCT(c);
+}
+
+static void WriteResInfo(Vector &result, idx_t i, const dggrid::ResInfo &r) {
+  auto &entries = StructVector::GetEntries(result);
+  FlatVector::GetData<int32_t>(GetStructEntry(entries, 0))[i] =
+      static_cast<int32_t>(r.res);
+  FlatVector::GetData<uint64_t>(GetStructEntry(entries, 1))[i] = r.cells;
+  FlatVector::GetData<double>(GetStructEntry(entries, 2))[i] = r.area_km;
+  FlatVector::GetData<double>(GetStructEntry(entries, 3))[i] = r.spacing_km;
+  FlatVector::GetData<double>(GetStructEntry(entries, 4))[i] = r.cls_km;
+}
+
+static LogicalType Vertex2DDType() {
+  child_list_t<LogicalType> c;
+  c.push_back({"keep", LogicalType::BOOLEAN});
+  c.push_back({"vert_num", LogicalType::INTEGER});
+  c.push_back({"tri_num", LogicalType::INTEGER});
+  c.push_back({"x", LogicalType::DOUBLE});
+  c.push_back({"y", LogicalType::DOUBLE});
+  return LogicalType::STRUCT(c);
+}
+
+static void WriteVertex2DD(Vector &result, idx_t i,
+                           const dggrid::Vertex2DDCoord &c) {
+  auto &entries = StructVector::GetEntries(result);
+  FlatVector::GetData<bool>(GetStructEntry(entries, 0))[i] = c.keep;
+  FlatVector::GetData<int32_t>(GetStructEntry(entries, 1))[i] = c.vertNum;
+  FlatVector::GetData<int32_t>(GetStructEntry(entries, 2))[i] = c.triNum;
+  FlatVector::GetData<double>(GetStructEntry(entries, 3))[i] = c.x;
+  FlatVector::GetData<double>(GetStructEntry(entries, 4))[i] = c.y;
 }
 
 // ===========================================================================
@@ -190,9 +236,11 @@ template <typename T> struct ArgReader {
 // Each child is independently unified so constant structs work correctly.
 struct ParamsReader {
   UnifiedVectorFormat proj_fmt, apt_fmt, topo_fmt, az_fmt, plat_fmt, plon_fmt;
-  const string_t *proj_data, *topo_data;
+  UnifiedVectorFormat is_apseq_fmt, apseq_fmt;
+  const string_t *proj_data, *topo_data, *apseq_data;
   const int32_t *apt_data;
   const double *az_data, *plat_data, *plon_data;
+  const bool *is_apseq_data;
 
   ParamsReader(Vector &params_vec, idx_t count) {
     auto &e = StructVector::GetEntries(params_vec);
@@ -208,6 +256,10 @@ struct ParamsReader {
     plat_data = UnifiedVectorFormat::GetData<double>(plat_fmt);
     GetStructEntry(e, 5).ToUnifiedFormat(count, plon_fmt);
     plon_data = UnifiedVectorFormat::GetData<double>(plon_fmt);
+    GetStructEntry(e, 6).ToUnifiedFormat(count, is_apseq_fmt);
+    is_apseq_data = UnifiedVectorFormat::GetData<bool>(is_apseq_fmt);
+    GetStructEntry(e, 7).ToUnifiedFormat(count, apseq_fmt);
+    apseq_data = UnifiedVectorFormat::GetData<string_t>(apseq_fmt);
   }
 
   dggrid::DggsParams operator[](idx_t i) const {
@@ -218,6 +270,8 @@ struct ParamsReader {
     p.azimuth_deg = az_data[az_fmt.sel->get_index(i)];
     p.pole_lat_deg = plat_data[plat_fmt.sel->get_index(i)];
     p.pole_lon_deg = plon_data[plon_fmt.sel->get_index(i)];
+    p.is_aperture_sequence = is_apseq_data[is_apseq_fmt.sel->get_index(i)];
+    p.aperture_sequence = apseq_data[apseq_fmt.sel->get_index(i)].GetString();
     return p;
   }
 };
@@ -234,9 +288,21 @@ static dggrid::DggsParams paramsWithRes(int32_t res) {
 // pole_lon_deg)
 // ===========================================================================
 
+// 6-arg overload: backward compatible (defaults is_aperture_sequence=false)
 static void DggsParamsFun(DataChunk &args, ExpressionState &, Vector &result) {
   auto &entries = StructVector::GetEntries(result);
   for (idx_t i = 0; i < 6; i++) {
+    GetStructEntry(entries, i).Reference(args.data[i]);
+  }
+  GetStructEntry(entries, 6).Reference(Value::BOOLEAN(false));
+  GetStructEntry(entries, 7).Reference(Value(""));
+}
+
+// 8-arg overload: includes aperture sequence
+static void DggsParamsApSeqFun(DataChunk &args, ExpressionState &,
+                               Vector &result) {
+  auto &entries = StructVector::GetEntries(result);
+  for (idx_t i = 0; i < 8; i++) {
     GetStructEntry(entries, i).Reference(args.data[i]);
   }
 }
@@ -1012,6 +1078,513 @@ static void SeqNumToSeqNumParamsFun(DataChunk &args, ExpressionState &,
 }
 
 // ===========================================================================
+// GRID STATISTICS  (res INTEGER [, params])
+// ===========================================================================
+
+static void DggsResInfoFun(DataChunk &args, ExpressionState &, Vector &result) {
+  idx_t n = args.size();
+  ArgReader<int32_t> res(args, 0, n);
+  for (idx_t i = 0; i < n; i++)
+    WriteResInfo(result, i, dggrid::getResAt(paramsWithRes(res[i]), res[i]));
+}
+static void DggsResInfoParamsFun(DataChunk &args, ExpressionState &,
+                                 Vector &result) {
+  idx_t n = args.size();
+  ArgReader<int32_t> res(args, 0, n);
+  ParamsReader params(args.data[1], n);
+  for (idx_t i = 0; i < n; i++) {
+    auto p = params[i];
+    p.res = res[i];
+    WriteResInfo(result, i, dggrid::getResAt(p, res[i]));
+  }
+}
+
+static void DggsNCellsFun(DataChunk &args, ExpressionState &, Vector &result) {
+  idx_t n = args.size();
+  ArgReader<int32_t> res(args, 0, n);
+  auto *out = FlatVector::GetData<uint64_t>(result);
+  for (idx_t i = 0; i < n; i++)
+    out[i] = dggrid::getResAt(paramsWithRes(res[i]), res[i]).cells;
+}
+static void DggsNCellsParamsFun(DataChunk &args, ExpressionState &,
+                                Vector &result) {
+  idx_t n = args.size();
+  ArgReader<int32_t> res(args, 0, n);
+  ParamsReader params(args.data[1], n);
+  auto *out = FlatVector::GetData<uint64_t>(result);
+  for (idx_t i = 0; i < n; i++) {
+    auto p = params[i];
+    p.res = res[i];
+    out[i] = dggrid::getResAt(p, res[i]).cells;
+  }
+}
+
+static void DggsCellAreaKMFun(DataChunk &args, ExpressionState &,
+                              Vector &result) {
+  idx_t n = args.size();
+  ArgReader<int32_t> res(args, 0, n);
+  auto *out = FlatVector::GetData<double>(result);
+  for (idx_t i = 0; i < n; i++)
+    out[i] = dggrid::getResAt(paramsWithRes(res[i]), res[i]).area_km;
+}
+static void DggsCellAreaKMParamsFun(DataChunk &args, ExpressionState &,
+                                    Vector &result) {
+  idx_t n = args.size();
+  ArgReader<int32_t> res(args, 0, n);
+  ParamsReader params(args.data[1], n);
+  auto *out = FlatVector::GetData<double>(result);
+  for (idx_t i = 0; i < n; i++) {
+    auto p = params[i];
+    p.res = res[i];
+    out[i] = dggrid::getResAt(p, res[i]).area_km;
+  }
+}
+
+static void DggsCellDistKMFun(DataChunk &args, ExpressionState &,
+                              Vector &result) {
+  idx_t n = args.size();
+  ArgReader<int32_t> res(args, 0, n);
+  auto *out = FlatVector::GetData<double>(result);
+  for (idx_t i = 0; i < n; i++)
+    out[i] = dggrid::getResAt(paramsWithRes(res[i]), res[i]).spacing_km;
+}
+static void DggsCellDistKMParamsFun(DataChunk &args, ExpressionState &,
+                                    Vector &result) {
+  idx_t n = args.size();
+  ArgReader<int32_t> res(args, 0, n);
+  ParamsReader params(args.data[1], n);
+  auto *out = FlatVector::GetData<double>(result);
+  for (idx_t i = 0; i < n; i++) {
+    auto p = params[i];
+    p.res = res[i];
+    out[i] = dggrid::getResAt(p, res[i]).spacing_km;
+  }
+}
+
+static void DggsClsKMFun(DataChunk &args, ExpressionState &, Vector &result) {
+  idx_t n = args.size();
+  ArgReader<int32_t> res(args, 0, n);
+  auto *out = FlatVector::GetData<double>(result);
+  for (idx_t i = 0; i < n; i++)
+    out[i] = dggrid::getResAt(paramsWithRes(res[i]), res[i]).cls_km;
+}
+static void DggsClsKMParamsFun(DataChunk &args, ExpressionState &,
+                               Vector &result) {
+  idx_t n = args.size();
+  ArgReader<int32_t> res(args, 0, n);
+  ParamsReader params(args.data[1], n);
+  auto *out = FlatVector::GetData<double>(result);
+  for (idx_t i = 0; i < n; i++) {
+    auto p = params[i];
+    p.res = res[i];
+    out[i] = dggrid::getResAt(p, res[i]).cls_km;
+  }
+}
+
+// ===========================================================================
+// NEIGHBORS  (seqnum UBIGINT, res INTEGER [, params])  → UBIGINT[]
+// ===========================================================================
+
+static void SeqNumNeighborsFun(DataChunk &args, ExpressionState &,
+                               Vector &result) {
+  idx_t n = args.size();
+  ArgReader<uint64_t> seqnum(args, 0, n);
+  ArgReader<int32_t> res(args, 1, n);
+
+  std::vector<std::vector<uint64_t>> all(n);
+  idx_t total = 0;
+  for (idx_t i = 0; i < n; i++) {
+    all[i] = dggrid::seqNumNeighbors(paramsWithRes(res[i]), seqnum[i]);
+    total += all[i].size();
+  }
+
+  ListVector::Reserve(result, total);
+  auto list_entries = ListVector::GetData(result);
+  auto &child = ListVector::GetEntry(result);
+  auto child_data = FlatVector::GetData<uint64_t>(child);
+  idx_t offset = 0;
+  for (idx_t i = 0; i < n; i++) {
+    list_entries[i].offset = offset;
+    list_entries[i].length = all[i].size();
+    for (auto nb : all[i])
+      child_data[offset++] = nb;
+  }
+  ListVector::SetListSize(result, total);
+}
+static void SeqNumNeighborsParamsFun(DataChunk &args, ExpressionState &,
+                                     Vector &result) {
+  idx_t n = args.size();
+  ArgReader<uint64_t> seqnum(args, 0, n);
+  ArgReader<int32_t> res(args, 1, n);
+  ParamsReader params(args.data[2], n);
+
+  std::vector<std::vector<uint64_t>> all(n);
+  idx_t total = 0;
+  for (idx_t i = 0; i < n; i++) {
+    auto p = params[i];
+    p.res = res[i];
+    all[i] = dggrid::seqNumNeighbors(p, seqnum[i]);
+    total += all[i].size();
+  }
+
+  ListVector::Reserve(result, total);
+  auto list_entries = ListVector::GetData(result);
+  auto &child = ListVector::GetEntry(result);
+  auto child_data = FlatVector::GetData<uint64_t>(child);
+  idx_t offset = 0;
+  for (idx_t i = 0; i < n; i++) {
+    list_entries[i].offset = offset;
+    list_entries[i].length = all[i].size();
+    for (auto nb : all[i])
+      child_data[offset++] = nb;
+  }
+  ListVector::SetListSize(result, total);
+}
+
+// ===========================================================================
+// PARENT  (seqnum UBIGINT, res INTEGER [, params])  → UBIGINT
+// ===========================================================================
+
+static void SeqNumParentFun(DataChunk &args, ExpressionState &,
+                            Vector &result) {
+  BinaryExecutor::Execute<uint64_t, int32_t, uint64_t>(
+      args.data[0], args.data[1], result, args.size(),
+      [](uint64_t seqnum, int32_t res) {
+        return dggrid::seqNumParent(paramsWithRes(res), seqnum);
+      });
+}
+static void SeqNumParentParamsFun(DataChunk &args, ExpressionState &,
+                                  Vector &result) {
+  idx_t n = args.size();
+  ArgReader<uint64_t> seqnum(args, 0, n);
+  ArgReader<int32_t> res(args, 1, n);
+  ParamsReader params(args.data[2], n);
+  auto *out = FlatVector::GetData<uint64_t>(result);
+  for (idx_t i = 0; i < n; i++) {
+    auto p = params[i];
+    p.res = res[i];
+    out[i] = dggrid::seqNumParent(p, seqnum[i]);
+  }
+}
+
+// ===========================================================================
+// CHILDREN  (seqnum UBIGINT, res INTEGER [, params])  → UBIGINT[]
+// ===========================================================================
+
+static void SeqNumChildrenFun(DataChunk &args, ExpressionState &,
+                              Vector &result) {
+  idx_t n = args.size();
+  ArgReader<uint64_t> seqnum(args, 0, n);
+  ArgReader<int32_t> res(args, 1, n);
+
+  std::vector<std::vector<uint64_t>> all(n);
+  idx_t total = 0;
+  for (idx_t i = 0; i < n; i++) {
+    all[i] = dggrid::seqNumChildren(paramsWithRes(res[i]), seqnum[i]);
+    total += all[i].size();
+  }
+
+  ListVector::Reserve(result, total);
+  auto list_entries = ListVector::GetData(result);
+  auto &child = ListVector::GetEntry(result);
+  auto child_data = FlatVector::GetData<uint64_t>(child);
+  idx_t offset = 0;
+  for (idx_t i = 0; i < n; i++) {
+    list_entries[i].offset = offset;
+    list_entries[i].length = all[i].size();
+    for (auto c : all[i])
+      child_data[offset++] = c;
+  }
+  ListVector::SetListSize(result, total);
+}
+static void SeqNumChildrenParamsFun(DataChunk &args, ExpressionState &,
+                                    Vector &result) {
+  idx_t n = args.size();
+  ArgReader<uint64_t> seqnum(args, 0, n);
+  ArgReader<int32_t> res(args, 1, n);
+  ParamsReader params(args.data[2], n);
+
+  std::vector<std::vector<uint64_t>> all(n);
+  idx_t total = 0;
+  for (idx_t i = 0; i < n; i++) {
+    auto p = params[i];
+    p.res = res[i];
+    all[i] = dggrid::seqNumChildren(p, seqnum[i]);
+    total += all[i].size();
+  }
+
+  ListVector::Reserve(result, total);
+  auto list_entries = ListVector::GetData(result);
+  auto &child = ListVector::GetEntry(result);
+  auto child_data = FlatVector::GetData<uint64_t>(child);
+  idx_t offset = 0;
+  for (idx_t i = 0; i < n; i++) {
+    list_entries[i].offset = offset;
+    list_entries[i].length = all[i].size();
+    for (auto c : all[i])
+      child_data[offset++] = c;
+  }
+  ListVector::SetListSize(result, total);
+}
+
+// ===========================================================================
+// HIERARCHICAL ADDRESSES  (seqnum/value UBIGINT, res INTEGER [, params])
+// ===========================================================================
+
+// ── ZORDER ──────────────────────────────────────────────────────────────────
+
+static void SeqNumToZOrderFun(DataChunk &args, ExpressionState &,
+                              Vector &result) {
+  BinaryExecutor::Execute<uint64_t, int32_t, uint64_t>(
+      args.data[0], args.data[1], result, args.size(),
+      [](uint64_t seqnum, int32_t res) {
+        return dggrid::seqNumToZOrder(paramsWithRes(res), seqnum).value;
+      });
+}
+static void SeqNumToZOrderParamsFun(DataChunk &args, ExpressionState &,
+                                    Vector &result) {
+  idx_t n = args.size();
+  ArgReader<uint64_t> seqnum(args, 0, n);
+  ArgReader<int32_t> res(args, 1, n);
+  ParamsReader params(args.data[2], n);
+  auto *out = FlatVector::GetData<uint64_t>(result);
+  for (idx_t i = 0; i < n; i++) {
+    auto p = params[i];
+    p.res = res[i];
+    out[i] = dggrid::seqNumToZOrder(p, seqnum[i]).value;
+  }
+}
+
+static void ZOrderToSeqNumFun(DataChunk &args, ExpressionState &,
+                              Vector &result) {
+  BinaryExecutor::Execute<uint64_t, int32_t, uint64_t>(
+      args.data[0], args.data[1], result, args.size(),
+      [](uint64_t value, int32_t res) {
+        return dggrid::zOrderToSeqNum(paramsWithRes(res), value);
+      });
+}
+static void ZOrderToSeqNumParamsFun(DataChunk &args, ExpressionState &,
+                                    Vector &result) {
+  idx_t n = args.size();
+  ArgReader<uint64_t> value(args, 0, n);
+  ArgReader<int32_t> res(args, 1, n);
+  ParamsReader params(args.data[2], n);
+  auto *out = FlatVector::GetData<uint64_t>(result);
+  for (idx_t i = 0; i < n; i++) {
+    auto p = params[i];
+    p.res = res[i];
+    out[i] = dggrid::zOrderToSeqNum(p, value[i]);
+  }
+}
+
+// ── Z3 ──────────────────────────────────────────────────────────────────────
+
+static void SeqNumToZ3Fun(DataChunk &args, ExpressionState &, Vector &result) {
+  BinaryExecutor::Execute<uint64_t, int32_t, uint64_t>(
+      args.data[0], args.data[1], result, args.size(),
+      [](uint64_t seqnum, int32_t res) {
+        return dggrid::seqNumToZ3(paramsWithRes(res), seqnum).value;
+      });
+}
+static void SeqNumToZ3ParamsFun(DataChunk &args, ExpressionState &,
+                                Vector &result) {
+  idx_t n = args.size();
+  ArgReader<uint64_t> seqnum(args, 0, n);
+  ArgReader<int32_t> res(args, 1, n);
+  ParamsReader params(args.data[2], n);
+  auto *out = FlatVector::GetData<uint64_t>(result);
+  for (idx_t i = 0; i < n; i++) {
+    auto p = params[i];
+    p.res = res[i];
+    out[i] = dggrid::seqNumToZ3(p, seqnum[i]).value;
+  }
+}
+
+static void Z3ToSeqNumFun(DataChunk &args, ExpressionState &, Vector &result) {
+  BinaryExecutor::Execute<uint64_t, int32_t, uint64_t>(
+      args.data[0], args.data[1], result, args.size(),
+      [](uint64_t value, int32_t res) {
+        return dggrid::z3ToSeqNum(paramsWithRes(res), value);
+      });
+}
+static void Z3ToSeqNumParamsFun(DataChunk &args, ExpressionState &,
+                                Vector &result) {
+  idx_t n = args.size();
+  ArgReader<uint64_t> value(args, 0, n);
+  ArgReader<int32_t> res(args, 1, n);
+  ParamsReader params(args.data[2], n);
+  auto *out = FlatVector::GetData<uint64_t>(result);
+  for (idx_t i = 0; i < n; i++) {
+    auto p = params[i];
+    p.res = res[i];
+    out[i] = dggrid::z3ToSeqNum(p, value[i]);
+  }
+}
+
+// ── Z7 ──────────────────────────────────────────────────────────────────────
+
+static void SeqNumToZ7Fun(DataChunk &args, ExpressionState &, Vector &result) {
+  BinaryExecutor::Execute<uint64_t, int32_t, uint64_t>(
+      args.data[0], args.data[1], result, args.size(),
+      [](uint64_t seqnum, int32_t res) {
+        return dggrid::seqNumToZ7(paramsWithRes(res), seqnum).value;
+      });
+}
+static void SeqNumToZ7ParamsFun(DataChunk &args, ExpressionState &,
+                                Vector &result) {
+  idx_t n = args.size();
+  ArgReader<uint64_t> seqnum(args, 0, n);
+  ArgReader<int32_t> res(args, 1, n);
+  ParamsReader params(args.data[2], n);
+  auto *out = FlatVector::GetData<uint64_t>(result);
+  for (idx_t i = 0; i < n; i++) {
+    auto p = params[i];
+    p.res = res[i];
+    out[i] = dggrid::seqNumToZ7(p, seqnum[i]).value;
+  }
+}
+
+static void Z7ToSeqNumFun(DataChunk &args, ExpressionState &, Vector &result) {
+  BinaryExecutor::Execute<uint64_t, int32_t, uint64_t>(
+      args.data[0], args.data[1], result, args.size(),
+      [](uint64_t value, int32_t res) {
+        return dggrid::z7ToSeqNum(paramsWithRes(res), value);
+      });
+}
+static void Z7ToSeqNumParamsFun(DataChunk &args, ExpressionState &,
+                                Vector &result) {
+  idx_t n = args.size();
+  ArgReader<uint64_t> value(args, 0, n);
+  ArgReader<int32_t> res(args, 1, n);
+  ParamsReader params(args.data[2], n);
+  auto *out = FlatVector::GetData<uint64_t>(result);
+  for (idx_t i = 0; i < n; i++) {
+    auto p = params[i];
+    p.res = res[i];
+    out[i] = dggrid::z7ToSeqNum(p, value[i]);
+  }
+}
+
+// ===========================================================================
+// ALL PARENTS  (seqnum UBIGINT, res INTEGER [, params])  → UBIGINT[]
+// ===========================================================================
+
+static void SeqNumAllParentsFun(DataChunk &args, ExpressionState &,
+                                Vector &result) {
+  idx_t n = args.size();
+  ArgReader<uint64_t> seqnum(args, 0, n);
+  ArgReader<int32_t> res(args, 1, n);
+
+  std::vector<std::vector<uint64_t>> all(n);
+  idx_t total = 0;
+  for (idx_t i = 0; i < n; i++) {
+    all[i] = dggrid::seqNumAllParents(paramsWithRes(res[i]), seqnum[i]);
+    total += all[i].size();
+  }
+
+  ListVector::Reserve(result, total);
+  auto list_entries = ListVector::GetData(result);
+  auto &child = ListVector::GetEntry(result);
+  auto child_data = FlatVector::GetData<uint64_t>(child);
+  idx_t offset = 0;
+  for (idx_t i = 0; i < n; i++) {
+    list_entries[i].offset = offset;
+    list_entries[i].length = all[i].size();
+    for (auto v : all[i])
+      child_data[offset++] = v;
+  }
+  ListVector::SetListSize(result, total);
+}
+static void SeqNumAllParentsParamsFun(DataChunk &args, ExpressionState &,
+                                      Vector &result) {
+  idx_t n = args.size();
+  ArgReader<uint64_t> seqnum(args, 0, n);
+  ArgReader<int32_t> res(args, 1, n);
+  ParamsReader params(args.data[2], n);
+
+  std::vector<std::vector<uint64_t>> all(n);
+  idx_t total = 0;
+  for (idx_t i = 0; i < n; i++) {
+    auto p = params[i];
+    p.res = res[i];
+    all[i] = dggrid::seqNumAllParents(p, seqnum[i]);
+    total += all[i].size();
+  }
+
+  ListVector::Reserve(result, total);
+  auto list_entries = ListVector::GetData(result);
+  auto &child = ListVector::GetEntry(result);
+  auto child_data = FlatVector::GetData<uint64_t>(child);
+  idx_t offset = 0;
+  for (idx_t i = 0; i < n; i++) {
+    list_entries[i].offset = offset;
+    list_entries[i].length = all[i].size();
+    for (auto v : all[i])
+      child_data[offset++] = v;
+  }
+  ListVector::SetListSize(result, total);
+}
+
+// ===========================================================================
+// VERTEX2DD  (seqnum UBIGINT, res INTEGER [, params])  → STRUCT
+//            (keep BOOL, vert_num INT, tri_num INT, x DOUBLE, y DOUBLE,
+//             res INTEGER [, params])  → UBIGINT
+// ===========================================================================
+
+static void SeqNumToVertex2DDFun(DataChunk &args, ExpressionState &,
+                                 Vector &result) {
+  idx_t n = args.size();
+  ArgReader<uint64_t> seqnum(args, 0, n);
+  ArgReader<int32_t> res(args, 1, n);
+  for (idx_t i = 0; i < n; i++)
+    WriteVertex2DD(result, i,
+                   dggrid::seqNumToVertex2DD(paramsWithRes(res[i]), seqnum[i]));
+}
+static void SeqNumToVertex2DDParamsFun(DataChunk &args, ExpressionState &,
+                                       Vector &result) {
+  idx_t n = args.size();
+  ArgReader<uint64_t> seqnum(args, 0, n);
+  ArgReader<int32_t> res(args, 1, n);
+  ParamsReader params(args.data[2], n);
+  for (idx_t i = 0; i < n; i++) {
+    auto p = params[i];
+    p.res = res[i];
+    WriteVertex2DD(result, i, dggrid::seqNumToVertex2DD(p, seqnum[i]));
+  }
+}
+
+static void Vertex2DDToSeqNumFun(DataChunk &args, ExpressionState &,
+                                 Vector &result) {
+  idx_t n = args.size();
+  ArgReader<bool> keep(args, 0, n);
+  ArgReader<int32_t> vert_num(args, 1, n);
+  ArgReader<int32_t> tri_num(args, 2, n);
+  ArgReader<double> x(args, 3, n), y(args, 4, n);
+  ArgReader<int32_t> res(args, 5, n);
+  auto *out = FlatVector::GetData<uint64_t>(result);
+  for (idx_t i = 0; i < n; i++)
+    out[i] = dggrid::vertex2DDToSeqNum(paramsWithRes(res[i]), keep[i],
+                                       vert_num[i], tri_num[i], x[i], y[i]);
+}
+static void Vertex2DDToSeqNumParamsFun(DataChunk &args, ExpressionState &,
+                                       Vector &result) {
+  idx_t n = args.size();
+  ArgReader<bool> keep(args, 0, n);
+  ArgReader<int32_t> vert_num(args, 1, n);
+  ArgReader<int32_t> tri_num(args, 2, n);
+  ArgReader<double> x(args, 3, n), y(args, 4, n);
+  ArgReader<int32_t> res(args, 5, n);
+  ParamsReader params(args.data[6], n);
+  auto *out = FlatVector::GetData<uint64_t>(result);
+  for (idx_t i = 0; i < n; i++) {
+    auto p = params[i];
+    p.res = res[i];
+    out[i] = dggrid::vertex2DDToSeqNum(p, keep[i], vert_num[i], tri_num[i],
+                                       x[i], y[i]);
+  }
+}
+
+// ===========================================================================
 // Registration
 // ===========================================================================
 
@@ -1021,11 +1594,24 @@ static void LoadInternal(ExtensionLoader &loader) {
 
   // ── dggs_params constructor ───────────────────────────────────────────────
   const auto PARAMS = DggsParamsType();
-  loader.RegisterFunction(ScalarFunction(
-      "dggs_params",
-      {LogicalType::VARCHAR, LogicalType::INTEGER, LogicalType::VARCHAR,
-       LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::DOUBLE},
-      PARAMS, DggsParamsFun));
+  {
+    const auto V = LogicalType::VARCHAR;
+    const auto BI = LogicalType::BOOLEAN;
+    ScalarFunctionSet params_set("dggs_params");
+    // 6-arg overload (backward compatible)
+    params_set.AddFunction(
+        ScalarFunction("dggs_params",
+                       {V, LogicalType::INTEGER, V, LogicalType::DOUBLE,
+                        LogicalType::DOUBLE, LogicalType::DOUBLE},
+                       PARAMS, DggsParamsFun));
+    // 8-arg overload (with aperture sequence)
+    params_set.AddFunction(
+        ScalarFunction("dggs_params",
+                       {V, LogicalType::INTEGER, V, LogicalType::DOUBLE,
+                        LogicalType::DOUBLE, LogicalType::DOUBLE, BI, V},
+                       PARAMS, DggsParamsApSeqFun));
+    loader.RegisterFunction(params_set);
+  }
 
   // ── arg type shorthands ──────────────────────────────────────────────────
   const auto D = LogicalType::DOUBLE;
@@ -1039,6 +1625,8 @@ static void LoadInternal(ExtensionLoader &loader) {
   const auto PROJTRI = ProjTriType();
   const auto Q2DD = Q2DDType();
   const auto Q2DI = Q2DIType();
+  const auto RESINFO = ResInfoType();
+  const auto LIST_UB = LogicalType::LIST(UB);
 
   // Helper: register two overloads for a function (without and with params)
   auto reg = [&](const char *name, vector<LogicalType> base_args,
@@ -1110,6 +1698,42 @@ static void LoadInternal(ExtensionLoader &loader) {
       SeqNumToSeqNumParamsFun);
   reg("seqnum_to_boundary", {UB, I}, GEO, SeqNumToBoundaryFun,
       SeqNumToBoundaryParamsFun);
+
+  // ── GRID STATISTICS ───────────────────────────────────────────────────────
+  reg("dggs_res_info", {I}, RESINFO, DggsResInfoFun, DggsResInfoParamsFun);
+  reg("dggs_n_cells", {I}, UB, DggsNCellsFun, DggsNCellsParamsFun);
+  reg("dggs_cell_area_km", {I}, D, DggsCellAreaKMFun, DggsCellAreaKMParamsFun);
+  reg("dggs_cell_dist_km", {I}, D, DggsCellDistKMFun, DggsCellDistKMParamsFun);
+  reg("dggs_cls_km", {I}, D, DggsClsKMFun, DggsClsKMParamsFun);
+
+  // ── NEIGHBORS ─────────────────────────────────────────────────────────────
+  reg("seqnum_neighbors", {UB, I}, LIST_UB, SeqNumNeighborsFun,
+      SeqNumNeighborsParamsFun);
+
+  // ── PARENT / CHILD ────────────────────────────────────────────────────────
+  reg("seqnum_parent", {UB, I}, UB, SeqNumParentFun, SeqNumParentParamsFun);
+  reg("seqnum_all_parents", {UB, I}, LIST_UB, SeqNumAllParentsFun,
+      SeqNumAllParentsParamsFun);
+  reg("seqnum_children", {UB, I}, LIST_UB, SeqNumChildrenFun,
+      SeqNumChildrenParamsFun);
+
+  // ── HIERARCHICAL ADDRESSES ────────────────────────────────────────────────
+  {
+    const auto VERTEX2DD = Vertex2DDType();
+    const auto BO = LogicalType::BOOLEAN;
+    reg("seqnum_to_vertex2dd", {UB, I}, VERTEX2DD, SeqNumToVertex2DDFun,
+        SeqNumToVertex2DDParamsFun);
+    reg("vertex2dd_to_seqnum", {BO, I, I, D, D, I}, UB, Vertex2DDToSeqNumFun,
+        Vertex2DDToSeqNumParamsFun);
+  }
+  reg("seqnum_to_zorder", {UB, I}, UB, SeqNumToZOrderFun,
+      SeqNumToZOrderParamsFun);
+  reg("zorder_to_seqnum", {UB, I}, UB, ZOrderToSeqNumFun,
+      ZOrderToSeqNumParamsFun);
+  reg("seqnum_to_z3", {UB, I}, UB, SeqNumToZ3Fun, SeqNumToZ3ParamsFun);
+  reg("z3_to_seqnum", {UB, I}, UB, Z3ToSeqNumFun, Z3ToSeqNumParamsFun);
+  reg("seqnum_to_z7", {UB, I}, UB, SeqNumToZ7Fun, SeqNumToZ7ParamsFun);
+  reg("z7_to_seqnum", {UB, I}, UB, Z7ToSeqNumFun, Z7ToSeqNumParamsFun);
 }
 
 void DuckDggsExtension::Load(ExtensionLoader &loader) { LoadInternal(loader); }

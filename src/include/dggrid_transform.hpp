@@ -18,6 +18,8 @@ struct DggsParams {
   double azimuth_deg = 0.0;
   double pole_lat_deg = 58.28252559; // ISEA default
   double pole_lon_deg = 11.25;       // ISEA default
+  bool is_aperture_sequence = false;
+  std::string aperture_sequence;
 
   DggsParams withRes(int r) const {
     DggsParams p = *this;
@@ -68,6 +70,26 @@ struct ResInfo {
   double cls_km = 0.0;
 };
 
+struct Vertex2DDCoord {
+  bool keep = true;
+  int vertNum = 0;
+  int triNum = 0;
+  double x = 0.0;
+  double y = 0.0;
+};
+
+struct ZOrderCoord {
+  uint64_t value = 0;
+};
+
+struct Z3Coord {
+  uint64_t value = 0;
+};
+
+struct Z7Coord {
+  uint64_t value = 0;
+};
+
 // ===========================================================================
 // Utility
 // ===========================================================================
@@ -76,10 +98,13 @@ DggsParams construct(const std::string &projection, unsigned int aperture,
                      const std::string &topology, int res,
                      double azimuth_deg = 0.0,
                      double pole_lat_deg = 58.28252559,
-                     double pole_lon_deg = 11.25);
+                     double pole_lon_deg = 11.25,
+                     bool is_aperture_sequence = false,
+                     const std::string &aperture_sequence = "");
 
 DggsParams setRes(const DggsParams &p, int res);
 std::vector<ResInfo> getRes(const DggsParams &p);
+ResInfo getResAt(const DggsParams &p, int res);
 uint64_t maxCell(const DggsParams &p, int res = -1);
 std::string info(const DggsParams &p);
 
@@ -147,5 +172,36 @@ SeqNum seqNumToSeqNum(const DggsParams &p, SeqNum seqnum);
 // sequence number.  The ring is open (first vertex is NOT repeated at the
 // end); the caller is responsible for closing it when writing WKB.
 std::vector<GeoCoord> seqNumToBoundary(const DggsParams &p, SeqNum seqnum);
+
+// ===========================================================================
+// Neighbors
+// ===========================================================================
+
+std::vector<SeqNum> seqNumNeighbors(const DggsParams &p, SeqNum seqnum);
+
+// ===========================================================================
+// Parent / Child
+// ===========================================================================
+
+SeqNum seqNumParent(const DggsParams &p, SeqNum seqnum);
+std::vector<SeqNum> seqNumAllParents(const DggsParams &p, SeqNum seqnum);
+std::vector<SeqNum> seqNumChildren(const DggsParams &p, SeqNum seqnum);
+
+// ===========================================================================
+// Hierarchical address types — SEQNUM conversions
+// ===========================================================================
+
+Vertex2DDCoord seqNumToVertex2DD(const DggsParams &p, SeqNum seqnum);
+SeqNum vertex2DDToSeqNum(const DggsParams &p, bool keep, int vertNum,
+                         int triNum, double x, double y);
+
+ZOrderCoord seqNumToZOrder(const DggsParams &p, SeqNum seqnum);
+SeqNum zOrderToSeqNum(const DggsParams &p, uint64_t value);
+
+Z3Coord seqNumToZ3(const DggsParams &p, SeqNum seqnum);
+SeqNum z3ToSeqNum(const DggsParams &p, uint64_t value);
+
+Z7Coord seqNumToZ7(const DggsParams &p, SeqNum seqnum);
+SeqNum z7ToSeqNum(const DggsParams &p, uint64_t value);
 
 } // namespace dggrid
