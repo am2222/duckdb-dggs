@@ -60,6 +60,7 @@
 #include <dglib/DgIVec2D.h>    // DgIVec2D (.i(), .j())
 #include <dglib/DgDVec2D.h>    // DgDVec2D (.x(), .y())
 #include <dglib/DgConstants.h> // M_PIl, M_ZERO
+#include <dglib/DgZOrderStringRF.h> // DgZOrderStringRF, DgZOrderStringCoord (must come before DgZOrderRF.h for MSVC)
 #include <dglib/DgZOrderRF.h>  // DgZOrderRF, DgZOrderCoord
 #include <dglib/DgZ3StringRF.h> // DgZ3StringRF, DgZ3StringCoord (must come before DgZ3RF.h for MSVC)
 #include <dglib/DgZ3RF.h> // DgZ3RF, DgZ3Coord
