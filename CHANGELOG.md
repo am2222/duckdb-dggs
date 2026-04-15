@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.5](https://github.com/am2222/duckdb-dggs/compare/v0.1.4...v0.1.5) (2026-04-15)
+
+
+### Bug Fixes
+
+* Define DUCKDB_EXTENSION_DUCK_DGGS_LINKED_LIBS for Emscripten compatibility ([779352a](https://github.com/am2222/duckdb-dggs/commit/779352a6b03f372c4c312d17165eb30e07d18633))
+
 ## [0.1.4](https://github.com/am2222/duckdb-dggs/compare/v0.1.3...v0.1.4) (2026-04-11)
 
 
