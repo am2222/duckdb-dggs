@@ -51,6 +51,11 @@ set(EXTENSION_SOURCES
     src/dggrid_transform.cpp
 )
 
+# Set LINKED_LIBS so the WASM (Emscripten) post-build emcc command can find
+# dglib.  Without this, the emcc -sSIDE_MODULE=2 step does not link dglib and
+# static symbols like DgGeoSphRF::icosaEdgeRads_ are left undefined.
+set(DUCKDB_EXTENSION_DUCK_DGGS_LINKED_LIBS $<TARGET_FILE:dglib>)
+
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
 build_loadable_extension(${TARGET_NAME} "" ${EXTENSION_SOURCES})
 
