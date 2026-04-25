@@ -65,8 +65,10 @@ void ParentAtFunction(DataChunk &args, ExpressionState &, Vector &result) {
   BinaryExecutor::Execute<uint64_t, int32_t, uint64_t>(
       args.data[0], args.data[1], result, args.size(),
       [](uint64_t raw, int32_t resolution) -> uint64_t {
-        if (resolution < 0) resolution = 0;
-        if (resolution > 20) resolution = 20;
+        if (resolution < 0)
+          resolution = 0;
+        if (resolution > 20)
+          resolution = 20;
         Z7::Z7Index idx(raw);
         Z7::Z7Index parent;
         parent.hierarchy.base = idx.hierarchy.base;
@@ -178,9 +180,8 @@ void FirstNonZeroFunction(DataChunk &args, ExpressionState &, Vector &result) {
 // False iff the index equals the UINT64_MAX sentinel used for invalid cells.
 void IsValidFunction(DataChunk &args, ExpressionState &, Vector &result) {
   UnaryExecutor::Execute<uint64_t, bool>(
-      args.data[0], result, args.size(), [](uint64_t raw) {
-        return raw != std::numeric_limits<uint64_t>::max();
-      });
+      args.data[0], result, args.size(),
+      [](uint64_t raw) { return raw != std::numeric_limits<uint64_t>::max(); });
 }
 
 // ── igeo7_encode(base, d1..d20) → UBIGINT ───────────────────────────────────
@@ -190,9 +191,9 @@ void IsValidFunction(DataChunk &args, ExpressionState &, Vector &result) {
 // digit & 0x07) — no range check required by callers.
 void EncodeFunction(DataChunk &args, ExpressionState &, Vector &result) {
   static constexpr int N_DIGITS = 20;
-  static constexpr int shifts[N_DIGITS] = {
-      57, 54, 51, 48, 45, 42, 39, 36, 33, 30,
-      27, 24, 21, 18, 15, 12,  9,  6,  3,  0};
+  static constexpr int shifts[N_DIGITS] = {57, 54, 51, 48, 45, 42, 39,
+                                           36, 33, 30, 27, 24, 21, 18,
+                                           15, 12, 9,  6,  3,  0};
 
   const idx_t count = args.size();
   result.SetVectorType(VectorType::FLAT_VECTOR);
@@ -255,9 +256,9 @@ void EncodeFunction(DataChunk &args, ExpressionState &, Vector &result) {
 void EncodeAtResolutionFunction(DataChunk &args, ExpressionState &,
                                 Vector &result) {
   static constexpr int N_DIGITS = 20;
-  static constexpr int shifts[N_DIGITS] = {
-      57, 54, 51, 48, 45, 42, 39, 36, 33, 30,
-      27, 24, 21, 18, 15, 12,  9,  6,  3,  0};
+  static constexpr int shifts[N_DIGITS] = {57, 54, 51, 48, 45, 42, 39,
+                                           36, 33, 30, 27, 24, 21, 18,
+                                           15, 12, 9,  6,  3,  0};
 
   const idx_t count = args.size();
   result.SetVectorType(VectorType::FLAT_VECTOR);
@@ -294,8 +295,10 @@ void EncodeAtResolutionFunction(DataChunk &args, ExpressionState &,
     }
 
     int64_t resolution = read_val(res_fmt, res_idx);
-    if (resolution < 0) resolution = 0;
-    if (resolution > 20) resolution = 20;
+    if (resolution < 0)
+      resolution = 0;
+    if (resolution > 20)
+      resolution = 20;
 
     uint64_t packed =
         static_cast<uint64_t>(read_val(base_fmt, base_idx) & 0x0FL) << 60;
@@ -377,9 +380,8 @@ void RegisterIGeo7Functions(ExtensionLoader &loader) {
     for (int i = 0; i < 20; i++) {
       encode_args.push_back(digit_type); // d1..d20
     }
-    loader.RegisterFunction(ScalarFunction("igeo7_encode",
-                                           std::move(encode_args), UB,
-                                           EncodeFunction));
+    loader.RegisterFunction(ScalarFunction(
+        "igeo7_encode", std::move(encode_args), UB, EncodeFunction));
   }
 
   // igeo7_encode_at_resolution: (base, res, d1..d20). Registered as C++
@@ -440,7 +442,8 @@ void RegisterIGeo7Functions(ExtensionLoader &loader) {
       {nullptr, nullptr, {nullptr}, {{nullptr, nullptr}}, nullptr}};
 
   for (idx_t i = 0; IGEO7_MACROS[i].name != nullptr; i++) {
-    auto info = DefaultFunctionGenerator::CreateInternalMacroInfo(IGEO7_MACROS[i]);
+    auto info =
+        DefaultFunctionGenerator::CreateInternalMacroInfo(IGEO7_MACROS[i]);
     loader.RegisterFunction(*info);
   }
 }
