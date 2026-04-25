@@ -44,11 +44,26 @@ add_subdirectory("${DGGRID_DIR}" "third_party/DGGRID" EXCLUDE_FROM_ALL)
 set(DGLIB_INCLUDE_DIR "${DGGRID_DIR}/src/lib/dglib/include")
 
 # --------------------------------------------------------------------------
+# Z7 core library (submodule at third_party/igeo7_duckdb, upstream:
+# https://github.com/allixender/igeo7_duckdb). We only compile the Z7 core
+# files under src/z7/ and register our own DuckDB scalar-function wrappers.
+# --------------------------------------------------------------------------
+set(Z7_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/igeo7_duckdb/src/z7")
+
+if(NOT EXISTS "${Z7_DIR}/library.h")
+    message(FATAL_ERROR
+        "igeo7_duckdb submodule not found at ${Z7_DIR}.\n"
+        "Run: git submodule update --init --recursive")
+endif()
+
+# --------------------------------------------------------------------------
 # Extension sources
 # --------------------------------------------------------------------------
 set(EXTENSION_SOURCES
     src/duck_dggs_extension.cpp
     src/dggrid_transform.cpp
+    src/igeo7_functions.cpp
+    "${Z7_DIR}/library.cpp"
 )
 
 # Set LINKED_LIBS so the WASM (Emscripten) post-build emcc command can find
@@ -59,8 +74,8 @@ set(DUCKDB_EXTENSION_DUCK_DGGS_LINKED_LIBS $<TARGET_FILE:dglib>)
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
 build_loadable_extension(${TARGET_NAME} "" ${EXTENSION_SOURCES})
 
-target_include_directories(${EXTENSION_NAME} PRIVATE "${DGLIB_INCLUDE_DIR}")
-target_include_directories(${LOADABLE_EXTENSION_NAME} PRIVATE "${DGLIB_INCLUDE_DIR}")
+target_include_directories(${EXTENSION_NAME} PRIVATE "${DGLIB_INCLUDE_DIR}" "${Z7_DIR}")
+target_include_directories(${LOADABLE_EXTENSION_NAME} PRIVATE "${DGLIB_INCLUDE_DIR}" "${Z7_DIR}")
 
 add_dependencies(${EXTENSION_NAME} dglib)
 add_dependencies(${LOADABLE_EXTENSION_NAME} dglib)

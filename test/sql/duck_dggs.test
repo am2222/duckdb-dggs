@@ -843,3 +843,172 @@ SELECT dggs_n_cells(4, dggs_params('ISEA', 7, 'HEXAGON', 0.0, 58.28252559, 11.25
 ----
 true
 
+# ============================================================
+# IGEO7 / Z7 bit-level operations
+#
+# Functions operate on the packed 64-bit Z7 index directly —
+# no DGGRID call, no dggs_params needed. Bit-level logic is
+# ported from https://github.com/allixender/igeo7_duckdb
+# ============================================================
+
+# ── String ↔ packed integer round trip ──────────────────────
+
+query I
+SELECT igeo7_to_string(igeo7_from_string('0800432'));
+----
+0800432
+
+query I
+SELECT igeo7_get_resolution(igeo7_from_string('0800432'));
+----
+5
+
+query I
+SELECT igeo7_get_base_cell(igeo7_from_string('0800432'));
+----
+8
+
+# ── Digit extraction (positions 1..5 meaningful, rest padding) ──
+
+query IIIIIIII
+SELECT
+    igeo7_get_digit(igeo7_from_string('0800432'), 1),
+    igeo7_get_digit(igeo7_from_string('0800432'), 2),
+    igeo7_get_digit(igeo7_from_string('0800432'), 3),
+    igeo7_get_digit(igeo7_from_string('0800432'), 4),
+    igeo7_get_digit(igeo7_from_string('0800432'), 5),
+    igeo7_get_digit(igeo7_from_string('0800432'), 6),
+    igeo7_get_digit(igeo7_from_string('0800432'), 20),
+    igeo7_get_digit(igeo7_from_string('0800432'), 99);
+----
+0	0	4	3	2	7	7	7
+
+# ── Encode is inverse of from_string ─────────────────────────
+
+query I
+SELECT igeo7_encode(8, 0,0,4,3,2, 7,7,7,7,7, 7,7,7,7,7, 7,7,7,7,7)
+     = igeo7_from_string('0800432');
+----
+true
+
+# Known packed value at resolution 13 (from upstream README)
+query I
+SELECT igeo7_encode(0, 0,1,6,1,6,1,2,0,6,2,4,1,3, 7,7,7,7,7,7,7)
+     = 32023330408103935::UBIGINT;
+----
+true
+
+# ── igeo7_encode_at_resolution matches parent_at ∘ encode ────
+
+query I
+SELECT igeo7_encode_at_resolution(8, 3,
+           0,0,4,3,2, 7,7,7,7,7, 7,7,7,7,7, 7,7,7,7,7)
+     = igeo7_parent_at(
+           igeo7_encode(8, 0,0,4,3,2, 7,7,7,7,7, 7,7,7,7,7, 7,7,7,7,7), 3);
+----
+true
+
+query I
+SELECT igeo7_to_string(
+    igeo7_encode_at_resolution(8, 3,
+        0,0,4,3,2, 7,7,7,7,7, 7,7,7,7,7, 7,7,7,7,7));
+----
+08004
+
+# ── Parent / parent_at ───────────────────────────────────────
+
+query I
+SELECT igeo7_to_string(igeo7_parent(igeo7_from_string('0800432')));
+----
+080043
+
+query I
+SELECT igeo7_to_string(igeo7_parent_at(igeo7_from_string('0800432'), 3));
+----
+08004
+
+# Climbing with igeo7_parent reduces resolution by 1 each step
+query I
+SELECT igeo7_get_resolution(
+    igeo7_parent(igeo7_parent(igeo7_parent(igeo7_from_string('0800432')))));
+----
+2
+
+# ── Neighbours ───────────────────────────────────────────────
+
+query I
+SELECT list_transform(
+    igeo7_get_neighbours(igeo7_from_string('0800432')),
+    x -> igeo7_to_string(x))
+    = ['0800433', '0800651', '0800064', '0800436', '0800430', '0800655'];
+----
+true
+
+query I
+SELECT igeo7_to_string(igeo7_get_neighbour(igeo7_from_string('0800432'), 1));
+----
+0800433
+
+# Out-of-range direction returns the invalid sentinel (UINT64_MAX)
+query I
+SELECT igeo7_get_neighbour(igeo7_from_string('0800432'), 0)
+     = 18446744073709551615::UBIGINT
+   AND igeo7_get_neighbour(igeo7_from_string('0800432'), 7)
+     = 18446744073709551615::UBIGINT;
+----
+true
+
+# ── is_valid / first_non_zero ────────────────────────────────
+
+query I
+SELECT igeo7_is_valid(igeo7_from_string('0800432'))
+   AND NOT igeo7_is_valid(18446744073709551615::UBIGINT);
+----
+true
+
+# First non-zero digit position for '0800432' (d1=0, d2=0, d3=4) is 3
+query I
+SELECT igeo7_first_non_zero(igeo7_from_string('0800432'));
+----
+3
+
+# ── Verbose decode macro ─────────────────────────────────────
+
+query I
+SELECT igeo7_decode_str(32023330408103935::UBIGINT);
+----
+0-0.1.6.1.6.1.2.0.6.2.4.1.3.7.7.7.7.7.7.7
+
+# ── String-domain macros ─────────────────────────────────────
+
+query III
+SELECT
+    igeo7_string_parent('0800432'),
+    igeo7_string_local_pos('0800432'),
+    igeo7_string_is_center('080040');
+----
+080043	2	true
+
+query I
+SELECT igeo7_string_is_center('0800432');
+----
+false
+
+# ── Composition with DGGRID-backed seqnum_to_z7 ──────────────
+# Confirms the DGGRID Z7 value and the bit-level functions use
+# the same packing (base cell + 20×3-bit digits).
+
+query I
+SELECT igeo7_get_resolution(
+    seqnum_to_z7(100::UBIGINT, 4,
+        dggs_params('ISEA', 7, 'HEXAGON', 0.0, 58.28252559, 11.25)));
+----
+4
+
+query I
+SELECT igeo7_is_valid(
+    seqnum_to_z7(100::UBIGINT, 4,
+        dggs_params('ISEA', 7, 'HEXAGON', 0.0, 58.28252559, 11.25)));
+----
+true
+

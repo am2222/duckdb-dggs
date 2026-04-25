@@ -102,6 +102,261 @@ SELECT z7_to_seqnum(1162491653815009279::UBIGINT, 4,
 -- → 100
 ```
 
+## IGEO7 / Z7 Bit-Level Operations
+
+These functions operate directly on the 64-bit packed IGEO7/Z7 index without
+going through DGGRID. They are self-contained bit manipulation — no
+`dggs_params` required — and can be composed with the aperture-7
+`seqnum_to_z7` / `z7_to_seqnum` converters above.
+
+Bit layout:
+
+```
+bits [63:60]  base cell  (4 bits, 0–11)
+bits [59:57]  digit 1    (3 bits, 0–6; 7 = padding)
+bits [56:54]  digit 2
+...
+bits  [2: 0]  digit 20
+```
+
+The compact string form (`igeo7_to_string`) stops before the first `7`, so
+its length reflects the resolution. The verbose form (`igeo7_decode_str`,
+SQL macro) shows all 20 slots for debugging.
+
+> Bit-level logic, neighbour traversal, and the companion macros are ported
+> from [`allixender/igeo7_duckdb`](https://github.com/allixender/igeo7_duckdb)
+> (MIT-licensed). The Z7 core library is vendored as a git submodule at
+> `third_party/igeo7_duckdb/src/z7`.
+
+### igeo7_from_string
+
+```sql
+UBIGINT igeo7_from_string (s VARCHAR)
+```
+
+Parse a compact IGEO7/Z7 string into the packed 64-bit index.
+
+```sql
+SELECT igeo7_from_string('0800432');
+-- → 612839406969683967
+```
+
+### igeo7_to_string
+
+```sql
+VARCHAR igeo7_to_string (idx UBIGINT)
+```
+
+Render the packed index as a compact string (stops before the first `7`).
+
+```sql
+SELECT igeo7_to_string(igeo7_from_string('0800432'));
+-- → '0800432'
+```
+
+### igeo7_encode
+
+```sql
+UBIGINT igeo7_encode (base UTINYINT, d1 UTINYINT, …, d20 UTINYINT)
+UBIGINT igeo7_encode (base INTEGER,  d1 INTEGER,  …, d20 INTEGER)
+```
+
+Pack a base cell and 20 three-bit digits into the canonical 64-bit layout.
+Use `7` for every slot beyond the target resolution. Field values are
+masked internally — no range check needed.
+
+```sql
+SELECT igeo7_to_string(
+    igeo7_encode(8, 0,0,4,3,2, 7,7,7,7,7, 7,7,7,7,7, 7,7,7,7,7));
+-- → '0800432'
+```
+
+### igeo7_encode_at_resolution
+
+```sql
+UBIGINT igeo7_encode_at_resolution (base, res INTEGER, d1..d20)
+```
+
+Encode then truncate to `res`, filling slots `(res+1)..20` with padding.
+
+```sql
+SELECT igeo7_to_string(
+    igeo7_encode_at_resolution(8, 3,
+        0,0,4,3,2, 7,7,7,7,7, 7,7,7,7,7, 7,7,7,7,7));
+-- → '08004'
+```
+
+### igeo7_get_resolution
+
+```sql
+INTEGER igeo7_get_resolution (idx UBIGINT)
+```
+
+Resolution (0–20) of a packed index.
+
+```sql
+SELECT igeo7_get_resolution(igeo7_from_string('0800432'));
+-- → 5
+```
+
+### igeo7_get_base_cell
+
+```sql
+UTINYINT igeo7_get_base_cell (idx UBIGINT)
+```
+
+Base cell ID (0–11).
+
+```sql
+SELECT igeo7_get_base_cell(igeo7_from_string('0800432'));
+-- → 8
+```
+
+### igeo7_get_digit
+
+```sql
+UTINYINT igeo7_get_digit (idx UBIGINT, pos INTEGER)
+```
+
+Extract digit at position `pos` (1..20). Returns `7` (padding) when out of
+range or beyond the cell's resolution.
+
+```sql
+SELECT igeo7_get_digit(igeo7_from_string('0800432'), 3);
+-- → 4
+```
+
+### igeo7_parent
+
+```sql
+UBIGINT igeo7_parent (idx UBIGINT)
+```
+
+Parent index (one level up).
+
+```sql
+SELECT igeo7_to_string(igeo7_parent(igeo7_from_string('0800432')));
+-- → '080043'
+```
+
+### igeo7_parent_at
+
+```sql
+UBIGINT igeo7_parent_at (idx UBIGINT, res INTEGER)
+```
+
+Ancestor at a specific resolution.
+
+```sql
+SELECT igeo7_to_string(igeo7_parent_at(igeo7_from_string('0800432'), 3));
+-- → '08004'
+```
+
+### igeo7_get_neighbours
+
+```sql
+UBIGINT[] igeo7_get_neighbours (idx UBIGINT)
+```
+
+All 6 neighbours. Pentagon-adjacent directions return `UINT64_MAX` —
+filter with `igeo7_is_valid`.
+
+```sql
+SELECT list_transform(
+    igeo7_get_neighbours(igeo7_from_string('0800432')),
+    x -> igeo7_to_string(x));
+-- → [0800433, 0800651, 0800064, 0800436, 0800430, 0800655]
+```
+
+### igeo7_get_neighbour
+
+```sql
+UBIGINT igeo7_get_neighbour (idx UBIGINT, direction INTEGER)
+```
+
+Single neighbour in direction 1..6.
+
+```sql
+SELECT igeo7_to_string(
+    igeo7_get_neighbour(igeo7_from_string('0800432'), 1));
+-- → '0800433'
+```
+
+### igeo7_first_non_zero
+
+```sql
+INTEGER igeo7_first_non_zero (idx UBIGINT)
+```
+
+Position (1..20) of the first non-zero digit slot; 0 when padding-only.
+
+### igeo7_is_valid
+
+```sql
+BOOLEAN igeo7_is_valid (idx UBIGINT)
+```
+
+`FALSE` only when the index equals the `UINT64_MAX` sentinel.
+
+```sql
+SELECT igeo7_is_valid(igeo7_from_string('0800432')),
+       igeo7_is_valid(18446744073709551615::UBIGINT);
+-- → true, false
+```
+
+### igeo7_decode_str
+
+```sql
+VARCHAR igeo7_decode_str (idx UBIGINT)   -- SQL macro
+```
+
+Verbose `base-d1.d2…d20` form showing all 20 slots (incl. padding).
+
+```sql
+SELECT igeo7_decode_str(32023330408103935::UBIGINT);
+-- → '0-0.1.6.1.6.1.2.0.6.2.4.1.3.7.7.7.7.7.7.7'
+```
+
+### igeo7_string_parent
+
+```sql
+VARCHAR igeo7_string_parent (s VARCHAR)   -- SQL macro
+```
+
+Drop the last char of a compact IGEO7 string.
+
+```sql
+SELECT igeo7_string_parent('0800432');
+-- → '080043'
+```
+
+### igeo7_string_local_pos
+
+```sql
+VARCHAR igeo7_string_local_pos (s VARCHAR)   -- SQL macro
+```
+
+Last char of a compact IGEO7 string (local position within the parent).
+
+```sql
+SELECT igeo7_string_local_pos('0800432');
+-- → '2'
+```
+
+### igeo7_string_is_center
+
+```sql
+BOOLEAN igeo7_string_is_center (s VARCHAR)   -- SQL macro
+```
+
+`TRUE` when the last digit is `'0'` — the cell overlaps the parent centroid.
+
+```sql
+SELECT igeo7_string_is_center('080040'),
+       igeo7_string_is_center('0800432');
+-- → true, false
+```
+
 ## Vertex 2DD
 
 Vertex-based 2D coordinates with triangle metadata. Available for all grid configurations.

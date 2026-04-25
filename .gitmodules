@@ -9,3 +9,6 @@
 [submodule "third_party/DGGRID"]
 	path = third_party/DGGRID
 	url = https://github.com/sahrk/DGGRID.git
+[submodule "third_party/igeo7_duckdb"]
+	path = third_party/igeo7_duckdb
+	url = https://github.com/allixender/igeo7_duckdb
