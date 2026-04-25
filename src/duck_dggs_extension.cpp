@@ -2,6 +2,7 @@
 
 #include "duck_dggs_extension.hpp"
 #include "dggrid_transform.hpp"
+#include "igeo7_functions.hpp"
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/function/scalar_function.hpp"
@@ -1734,6 +1735,9 @@ static void LoadInternal(ExtensionLoader &loader) {
   reg("z3_to_seqnum", {UB, I}, UB, Z3ToSeqNumFun, Z3ToSeqNumParamsFun);
   reg("seqnum_to_z7", {UB, I}, UB, SeqNumToZ7Fun, SeqNumToZ7ParamsFun);
   reg("z7_to_seqnum", {UB, I}, UB, Z7ToSeqNumFun, Z7ToSeqNumParamsFun);
+
+  // ── IGEO7 / Z7 bit-level index manipulation ──────────────────────────────
+  RegisterIGeo7Functions(loader);
 }
 
 void DuckDggsExtension::Load(ExtensionLoader &loader) { LoadInternal(loader); }
