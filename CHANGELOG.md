@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.1.6](https://github.com/am2222/duckdb-dggs/compare/v0.1.5...v0.1.6) (2026-04-25)
+
+
+### Features
+
+* add igeo7_duckdb submodule for enhanced functionality ([177b719](https://github.com/am2222/duckdb-dggs/commit/177b7199c0c274b7846f2daff1fa02c86348bd79))
+* Add IGEO7/Z7 bit-level functions to duck_dggs extension ([d8c4122](https://github.com/am2222/duckdb-dggs/commit/d8c4122dfd61e12256914c3d218e64f9eb06b61b))
+* Update extension version and enhance IGEO7/Z7 documentation with new functions ([1b99a0b](https://github.com/am2222/duckdb-dggs/commit/1b99a0b98225d79e6c02d5b316a0479b199a2ca0))
+* Update README and tests with IGEO7/Z7 bit-level operations ([1f2f5ae](https://github.com/am2222/duckdb-dggs/commit/1f2f5ae83f9d6b47d6875c3fbed37873b895581c))
+
 ## [0.1.5](https://github.com/am2222/duckdb-dggs/compare/v0.1.4...v0.1.5) (2026-04-15)
 
 
