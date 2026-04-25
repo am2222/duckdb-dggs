@@ -4,6 +4,11 @@
   <p>A DuckDB extension for discrete global grid systems (DGGS) powered by <a href="https://github.com/sahrk/DGGRID">DGGRID v8</a>.<br/>
   Transforms geographic coordinates to and from DGGS cell identifiers across multiple coordinate reference frames.</p>
   <p><strong><a href="https://am2222.github.io/duckdb-dggs/">Documentation</a></strong></p>
+  <p>
+    <a href="https://github.com/am2222/duckdb-dggs/actions/workflows/CI.yml"><img src="https://github.com/am2222/duckdb-dggs/actions/workflows/CI.yml/badge.svg?branch=main" alt="CI"/></a>
+    <a href="test/sql/duck_dggs.test"><img src="https://img.shields.io/badge/tests-134%20passing-brightgreen" alt="tests: 134 passing"/></a>
+    <a href="LICENSE"><img src="https://img.shields.io/github/license/am2222/duckdb-dggs" alt="License"/></a>
+  </p>
 </div>
 
 ---
