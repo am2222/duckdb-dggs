@@ -14,6 +14,9 @@
 ---
 
 ## Quick start
+[Duck DB](https://duckdb.org/) is a very fast, in-process analytical SQL database designed for embedded analytics on local files and dataframes.
+Its extension system lets projects like this one add domain-specific functions — here, DGGS operations — that run inside the same SQL engine.
+
 This extension exposes [DGGRID](https://github.com/sahrk/DGGRID) Discrete Global Grid System (DGGS) operations as DuckDB scalar functions.
 
 
