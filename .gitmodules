@@ -6,6 +6,7 @@
 	path = extension-ci-tools
 	url = https://github.com/duckdb/extension-ci-tools
 	branch = main
+	ignore = untracked
 [submodule "third_party/DGGRID"]
 	path = third_party/DGGRID
 	url = https://github.com/sahrk/DGGRID.git
