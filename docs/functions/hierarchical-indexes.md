@@ -357,6 +357,61 @@ SELECT igeo7_string_is_center('080040'),
 -- → true, false
 ```
 
+## WGS84 Geodetic ↔ Authalic Latitude
+
+Authalic latitudes preserve area when projecting onto an equal-area
+sphere of the same total surface area as the WGS84 ellipsoid. These
+helpers remap **every vertex's latitude** of a `GEOMETRY` between
+geodetic (the usual lon/lat on WGS84) and authalic — useful as a
+pre-step before equal-area binning of lon/lat points (including IGEO7
+cell statistics).
+
+The mapping is the order-6 polynomial Fourier series from Karney 2022
+([_On auxiliary latitudes_](https://arxiv.org/abs/2212.05818)). Only
+the `Y` component of each coordinate is rewritten; X (and any Z/M) pass
+through unchanged. Both functions support POINT, LINESTRING, POLYGON,
+MULTI*, and GEOMETRYCOLLECTION inputs.
+
+> The math is vendored from
+> [`allixender/igeo7_duckdb`](https://github.com/allixender/igeo7_duckdb)
+> at `src/auth/authalic.cpp` (via the `third_party/igeo7_duckdb`
+> submodule).
+
+### igeo7_geo_to_authalic
+
+```sql
+GEOMETRY igeo7_geo_to_authalic (geom GEOMETRY)
+```
+
+Convert each vertex's geodetic latitude (WGS84) to authalic latitude.
+Identity at the equator and at both poles.
+
+```sql
+SELECT igeo7_geo_to_authalic('POINT (0 45)'::GEOMETRY);
+-- → POINT (0 44.87170287343394)
+
+SELECT igeo7_geo_to_authalic(
+    'POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0))'::GEOMETRY);
+-- → POLYGON ((0 0, 10 0, 10 9.956198098935733, 0 9.956198098935733, 0 0))
+```
+
+### igeo7_authalic_to_geo
+
+```sql
+GEOMETRY igeo7_authalic_to_geo (geom GEOMETRY)
+```
+
+Inverse of `igeo7_geo_to_authalic`. Round-tripping
+`igeo7_authalic_to_geo(igeo7_geo_to_authalic(g))` recovers `g` to
+within ~1e-12° across the full latitude range.
+
+```sql
+SELECT igeo7_authalic_to_geo(
+    igeo7_geo_to_authalic('POINT (-71.5 42.3)'::GEOMETRY)
+);
+-- → POINT (-71.5 42.3)
+```
+
 ## Vertex 2DD
 
 Vertex-based 2D coordinates with triangle metadata. Available for all grid configurations.

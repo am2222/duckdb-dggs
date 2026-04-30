@@ -20,9 +20,12 @@
 #include "duckdb/parser/parsed_data/create_macro_info.hpp"
 
 #include "library.h"
+#include "auth/authalic.hpp"
 
 #include <array>
+#include <cstring>
 #include <limits>
+#include <stdexcept>
 #include <string>
 
 namespace duckdb {
@@ -247,6 +250,153 @@ void EncodeFunction(DataChunk &args, ExpressionState &, Vector &result) {
   }
 }
 
+// ── igeo7_geo_to_authalic / igeo7_authalic_to_geo (GEOMETRY) → GEOMETRY ─────
+// Walk a DuckDB GEOMETRY (little-endian WKB) and remap every vertex's latitude
+// (Y coordinate) using the WGS84 authalic-latitude transform from
+// auth/authalic.hpp (Karney 2022, polynomial order 6).
+//
+// The geodetic↔authalic mapping is purely 1-D (φ → ξ), so X/Z/M components are
+// copied through unchanged; only the Y double of each coordinate tuple is
+// rewritten. Output WKB has identical layout and size to the input.
+//
+// Supports POINT, LINESTRING, POLYGON, MULTI*, GEOMETRYCOLLECTION, plus
+// XYZ/XYM/XYZM dimension flags via the EWKB-style type_id encoding
+// (type % 1000 = base type, type / 1000 = dim flag: 0=XY, 1=XYZ, 2=XYM,
+// 3=XYZM). Throws on byte-order != little-endian (DuckDB's internal form).
+namespace authalic_wkb {
+
+inline uint8_t ReadU8(const uint8_t *src, std::size_t &off) {
+  uint8_t v = src[off];
+  off += 1;
+  return v;
+}
+
+inline uint32_t ReadU32(const uint8_t *src, std::size_t &off) {
+  uint32_t v;
+  std::memcpy(&v, src + off, sizeof(v));
+  off += sizeof(v);
+  return v;
+}
+
+inline double ReadF64(const uint8_t *src, std::size_t &off) {
+  double v;
+  std::memcpy(&v, src + off, sizeof(v));
+  off += sizeof(v);
+  return v;
+}
+
+inline void WriteU8(uint8_t *dst, std::size_t &off, uint8_t v) {
+  dst[off] = v;
+  off += 1;
+}
+
+inline void WriteU32(uint8_t *dst, std::size_t &off, uint32_t v) {
+  std::memcpy(dst + off, &v, sizeof(v));
+  off += sizeof(v);
+}
+
+inline void WriteF64(uint8_t *dst, std::size_t &off, double v) {
+  std::memcpy(dst + off, &v, sizeof(v));
+  off += sizeof(v);
+}
+
+void TransformVertices(const uint8_t *in, uint8_t *out, std::size_t &in_off,
+                       std::size_t &out_off, uint32_t count, uint32_t flag,
+                       bool to_authalic) {
+  // stride: XY=2, XYZ/XYM=3, XYZM=4 doubles per vertex.
+  const uint32_t stride = (flag == 3) ? 4 : (flag == 0 ? 2 : 3);
+  for (uint32_t i = 0; i < count; i++) {
+    double x = ReadF64(in, in_off);
+    double y = ReadF64(in, in_off);
+    double y2 = to_authalic ? auth::geodetic_to_authalic(y)
+                            : auth::authalic_to_geodetic(y);
+    WriteF64(out, out_off, x);
+    WriteF64(out, out_off, y2);
+    for (uint32_t k = 2; k < stride; k++) {
+      WriteF64(out, out_off, ReadF64(in, in_off));
+    }
+  }
+}
+
+void TransformOne(const uint8_t *in, uint8_t *out, std::size_t &in_off,
+                  std::size_t &out_off, std::size_t in_size, bool to_authalic) {
+  uint8_t order = ReadU8(in, in_off);
+  WriteU8(out, out_off, order);
+  if (order != 0x01) {
+    throw std::runtime_error(
+        "igeo7_geo_to_authalic: only little-endian WKB is supported");
+  }
+  uint32_t meta = ReadU32(in, in_off);
+  WriteU32(out, out_off, meta);
+  uint32_t low = meta & 0x0000FFFFu;
+  uint32_t type_id = low % 1000;
+  uint32_t flag_id = low / 1000;
+  switch (type_id) {
+  case 1: // POINT
+    TransformVertices(in, out, in_off, out_off, 1, flag_id, to_authalic);
+    break;
+  case 2: { // LINESTRING
+    uint32_t n = ReadU32(in, in_off);
+    WriteU32(out, out_off, n);
+    TransformVertices(in, out, in_off, out_off, n, flag_id, to_authalic);
+    break;
+  }
+  case 3: { // POLYGON
+    uint32_t rings = ReadU32(in, in_off);
+    WriteU32(out, out_off, rings);
+    for (uint32_t r = 0; r < rings; r++) {
+      uint32_t n = ReadU32(in, in_off);
+      WriteU32(out, out_off, n);
+      TransformVertices(in, out, in_off, out_off, n, flag_id, to_authalic);
+    }
+    break;
+  }
+  case 4:   // MULTIPOINT
+  case 5:   // MULTILINESTRING
+  case 6:   // MULTIPOLYGON
+  case 7: { // GEOMETRYCOLLECTION
+    uint32_t parts = ReadU32(in, in_off);
+    WriteU32(out, out_off, parts);
+    for (uint32_t p = 0; p < parts; p++) {
+      TransformOne(in, out, in_off, out_off, in_size, to_authalic);
+    }
+    break;
+  }
+  default:
+    throw std::runtime_error("igeo7_geo_to_authalic: unsupported WKB type " +
+                             std::to_string(type_id));
+  }
+}
+
+string_t Transform(Vector &result, const string_t &wkb, bool to_authalic) {
+  const auto size = wkb.GetSize();
+  auto out_str = StringVector::EmptyString(result, size);
+  auto *in = reinterpret_cast<const uint8_t *>(wkb.GetData());
+  auto *out = reinterpret_cast<uint8_t *>(out_str.GetDataWriteable());
+  std::size_t in_off = 0, out_off = 0;
+  while (in_off < size) {
+    TransformOne(in, out, in_off, out_off, size, to_authalic);
+  }
+  out_str.Finalize();
+  return out_str;
+}
+
+} // namespace authalic_wkb
+
+void GeoToAuthalicFunction(DataChunk &args, ExpressionState &, Vector &result) {
+  UnaryExecutor::Execute<string_t, string_t>(
+      args.data[0], result, args.size(), [&](string_t wkb) {
+        return authalic_wkb::Transform(result, wkb, /*to_authalic=*/true);
+      });
+}
+
+void AuthalicToGeoFunction(DataChunk &args, ExpressionState &, Vector &result) {
+  UnaryExecutor::Execute<string_t, string_t>(
+      args.data[0], result, args.size(), [&](string_t wkb) {
+        return authalic_wkb::Transform(result, wkb, /*to_authalic=*/false);
+      });
+}
+
 // ── igeo7_encode_at_resolution(base, res, d1..d20) → UBIGINT ────────────────
 // Pack base + 20 digits, then truncate to the given resolution (slots after
 // `res` are overwritten with 7 = padding). Equivalent to
@@ -335,6 +485,15 @@ void RegisterIGeo7Functions(ExtensionLoader &loader) {
   const auto V = LogicalType::VARCHAR;
   const auto UT = LogicalType::UTINYINT;
   const auto BO = LogicalType::BOOLEAN;
+  const auto GEO = LogicalType::GEOMETRY();
+
+  // WGS84 geodetic ↔ authalic latitude conversion (Karney 2022 Fourier series)
+  // applied to every vertex Y of a GEOMETRY. Useful before/after equal-area
+  // operations on lon/lat data.
+  loader.RegisterFunction(ScalarFunction("igeo7_geo_to_authalic", {GEO}, GEO,
+                                         GeoToAuthalicFunction));
+  loader.RegisterFunction(ScalarFunction("igeo7_authalic_to_geo", {GEO}, GEO,
+                                         AuthalicToGeoFunction));
 
   loader.RegisterFunction(
       ScalarFunction("igeo7_get_resolution", {UB}, I, GetResolutionFunction));
