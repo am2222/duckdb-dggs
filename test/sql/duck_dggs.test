@@ -1012,3 +1012,82 @@ SELECT igeo7_is_valid(
 ----
 true
 
+# ── WGS84 geodetic ↔ authalic latitude conversion ────────────
+# Karney 2022 polynomial (order 6) Fourier series. Surfaces the
+# latitude remap from third_party/igeo7_duckdb/src/auth/. The
+# transform only touches the Y component; X / Z / M pass through.
+# These tests deliberately avoid the spatial extension's ST_*
+# helpers so the suite still passes without `LOAD spatial`.
+
+# Equator and both poles are fixed points of the mapping (string
+# comparison of the canonical GEOMETRY form).
+query III
+SELECT
+    igeo7_geo_to_authalic('POINT (0 0)'::GEOMETRY)::VARCHAR,
+    igeo7_geo_to_authalic('POINT (45 90)'::GEOMETRY)::VARCHAR,
+    igeo7_geo_to_authalic('POINT (45 -90)'::GEOMETRY)::VARCHAR;
+----
+POINT (0 0)	POINT (45 90)	POINT (45 -90)
+
+# Expected value at φ=45°: ξ ≈ 44.8717028734° (Karney 2022).
+query I
+SELECT igeo7_geo_to_authalic('POINT (0 45)'::GEOMETRY)::VARCHAR;
+----
+POINT (0 44.87170287343394)
+
+# Mapping is odd: ξ(-φ) = -ξ(φ). Compare the two canonical forms
+# differ only by a leading minus on the second coordinate.
+query I
+SELECT
+    igeo7_geo_to_authalic('POINT (0 -45)'::GEOMETRY)::VARCHAR;
+----
+POINT (0 -44.87170287343394)
+
+# Round-trip preserves a POINT exactly (canonical string equality).
+query I
+SELECT igeo7_authalic_to_geo(
+           igeo7_geo_to_authalic('POINT (-71.5 42.3)'::GEOMETRY)
+       )::VARCHAR;
+----
+POINT (-71.5 42.3)
+
+# POLYGON: every vertex Y is remapped, X/closure preserved.
+query I
+SELECT igeo7_geo_to_authalic(
+    'POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0))'::GEOMETRY
+)::VARCHAR;
+----
+POLYGON ((0 0, 10 0, 10 9.956198098935733, 0 9.956198098935733, 0 0))
+
+# LINESTRING with multiple latitudes.
+query I
+SELECT igeo7_geo_to_authalic(
+    'LINESTRING (0 0, 0 30, 0 60)'::GEOMETRY
+)::VARCHAR;
+----
+LINESTRING (0 0, 0 29.888997034459564, 0 59.88878556988515)
+
+# MULTIPOLYGON exercises the recursive walker over collection parts.
+query I
+SELECT igeo7_geo_to_authalic(
+    'MULTIPOLYGON (((0 0, 10 0, 10 10, 0 10, 0 0)),
+                   ((20 20, 30 20, 30 30, 20 30, 20 20)))'::GEOMETRY
+)::VARCHAR;
+----
+MULTIPOLYGON (((0 0, 10 0, 10 9.956198098935733, 0 9.956198098935733, 0 0)), ((20 19.917652210017884, 30 19.917652210017884, 30 29.888997034459564, 20 29.888997034459564, 20 19.917652210017884)))
+
+# GEOMETRYCOLLECTION: heterogeneous parts all transformed.
+query I
+SELECT igeo7_geo_to_authalic(
+    'GEOMETRYCOLLECTION (POINT (0 45), LINESTRING (0 0, 0 30))'::GEOMETRY
+)::VARCHAR;
+----
+GEOMETRYCOLLECTION (POINT (0 44.87170287343394), LINESTRING (0 0, 0 29.888997034459564))
+
+# Round-trip preserves a polygon exactly (string-equal canonical form).
+query I
+SELECT igeo7_authalic_to_geo(igeo7_geo_to_authalic(g))::VARCHAR = g::VARCHAR
+FROM (VALUES ('POLYGON ((-71.5 42.3, -70 42.3, -70 43, -71.5 43, -71.5 42.3))'::GEOMETRY)) t(g);
+----
+true
+

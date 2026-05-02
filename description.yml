@@ -138,3 +138,4 @@ docs:
     - `igeo7_is_valid` — false only for the `UINT64_MAX` invalid-neighbour sentinel
     - `igeo7_decode_str` — verbose `base-d1.d2…d20` form showing all 20 slots (SQL macro)
     - `igeo7_string_parent` / `igeo7_string_local_pos` / `igeo7_string_is_center` — compact-string helpers (SQL macros)
+    - `igeo7_geo_to_authalic` / `igeo7_authalic_to_geo` — remap each vertex's latitude in a `GEOMETRY` between WGS84 geodetic and authalic (equal-area sphere) using the Karney 2022 order-6 polynomial Fourier series; useful before equal-area binning of lon/lat data

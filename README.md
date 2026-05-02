@@ -14,10 +14,8 @@
 ---
 
 ## Quick start
-[Duck DB](https://duckdb.org/) is a very fast, in-process analytical SQL database designed for embedded analytics on local files and dataframes.
-Its extension system lets projects like this one add domain-specific functions — here, DGGS operations — that run inside the same SQL engine.
 
-This extension exposes [DGGRID](https://github.com/sahrk/DGGRID) Discrete Global Grid System (DGGS) operations as DuckDB scalar functions.
+This extension exposes [DGGRID](https://github.com/sahrk/DGGRID) Discrete Global Grid System (DGGS) operations as DuckDB scalar functions. To learn more about DGGRID with interactive demos visit [WebDggrid](https://am2222.github.io/webDggrid/demo.html) documents.
 
 
 ```sql
@@ -141,6 +139,8 @@ Every function has a second overload that accepts an explicit [`dggs_params`](#d
 | [`igeo7_string_parent`](#igeo7_string_parent) | VARCHAR | `VARCHAR` | Drop last char of a compact IGEO7 string. |
 | [`igeo7_string_local_pos`](#igeo7_string_local_pos) | VARCHAR | `VARCHAR` | Last char of a compact IGEO7 string. |
 | [`igeo7_string_is_center`](#igeo7_string_is_center) | VARCHAR | `BOOLEAN` | True when last digit is `'0'` (center of parent). |
+| [`igeo7_geo_to_authalic`](#igeo7_geo_to_authalic) | GEOMETRY | `GEOMETRY` | Remap each vertex's latitude from geodetic → authalic (WGS84). |
+| [`igeo7_authalic_to_geo`](#igeo7_authalic_to_geo) | GEOMETRY | `GEOMETRY` | Remap each vertex's latitude from authalic → geodetic (WGS84). |
 
 ----
 
@@ -2068,6 +2068,81 @@ BOOLEAN igeo7_string_is_center (s VARCHAR)   -- SQL macro
 SELECT igeo7_string_is_center('080040') AS center,
        igeo7_string_is_center('0800432') AS not_center;
 -- → center = true, not_center = false
+```
+
+----
+
+### igeo7_geo_to_authalic
+
+#### Signature
+
+```sql
+GEOMETRY igeo7_geo_to_authalic (geom GEOMETRY)
+```
+
+#### Description
+
+Converts every vertex's latitude in `geom` from **geodetic** (WGS84
+ellipsoid) to **authalic** (equal-area sphere) latitude. Longitude (X)
+and any Z/M components are passed through unchanged. Authalic latitudes
+preserve area when projecting onto an equal-area sphere of the same
+total surface area as WGS84 — useful as a pre-step before equal-area
+binning (including IGEO7/Z7 cell statistics) on lon/lat data.
+
+The mapping is the order-6 polynomial Fourier series from Karney 2022
+([_On auxiliary latitudes_](https://arxiv.org/abs/2212.05818)). The
+WGS84 coefficients are precomputed once at startup. The transform is
+identity at the equator and at both poles.
+
+Supports POINT, LINESTRING, POLYGON, MULTIPOINT, MULTILINESTRING,
+MULTIPOLYGON, GEOMETRYCOLLECTION (XY / XYZ / XYM / XYZM). Throws on
+big-endian WKB (DuckDB's internal `GEOMETRY` storage is always
+little-endian).
+
+The math comes from
+[`allixender/igeo7_duckdb`](https://github.com/allixender/igeo7_duckdb)
+(`src/auth/authalic.cpp`) — vendored via the `third_party/igeo7_duckdb`
+submodule.
+
+#### Example
+
+```sql
+SELECT igeo7_geo_to_authalic('POINT (0 45)'::GEOMETRY);
+-- → POINT (0 44.87170287343394)
+
+SELECT igeo7_geo_to_authalic(
+    'POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0))'::GEOMETRY);
+-- → POLYGON ((0 0, 10 0, 10 9.956198098935733,
+--             0 9.956198098935733, 0 0))
+```
+
+----
+
+### igeo7_authalic_to_geo
+
+#### Signature
+
+```sql
+GEOMETRY igeo7_authalic_to_geo (geom GEOMETRY)
+```
+
+#### Description
+
+Inverse of [`igeo7_geo_to_authalic`](#igeo7_geo_to_authalic): remaps
+each vertex's latitude from **authalic** back to **geodetic** (WGS84).
+Round-tripping `igeo7_authalic_to_geo(igeo7_geo_to_authalic(g))`
+recovers `g` to within ~1e-12° across the full latitude range.
+
+Uses the order-6 inverse polynomial coefficients from Karney 2022 (table
+A20). Same supported geometry surface as the forward function.
+
+#### Example
+
+```sql
+SELECT igeo7_authalic_to_geo(
+    igeo7_geo_to_authalic('POINT (-71.5 42.3)'::GEOMETRY)
+);
+-- → POINT (-71.5 42.3)
 ```
 
 ----
