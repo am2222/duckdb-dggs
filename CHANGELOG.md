@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.7](https://github.com/am2222/duckdb-dggs/compare/v0.1.6...v0.1.7) (2026-05-02)
+
+
+### Features
+
+* added igeo7_geo_to_authalic and igeo7_authalic_to_geo ([8a899af](https://github.com/am2222/duckdb-dggs/commit/8a899af8b5d3e1c599229f7286a3fd1caba25e56))
+
+
+### Bug Fixes
+
+* set submodule untrackable ([459a659](https://github.com/am2222/duckdb-dggs/commit/459a659b6165eccff616e6decff423a47224404d))
+
 ## [0.1.6](https://github.com/am2222/duckdb-dggs/compare/v0.1.5...v0.1.6) (2026-04-25)
 
 
