@@ -49,6 +49,18 @@ SELECT geo_to_seqnum('POINT(0.0 0.0)'::GEOMETRY, 5,
 
 See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for build and test instructions.
 
+Native tests run with `make test`. To verify the **deployed WASM build** loads
+and runs the test suite in WebAssembly:
+
+```sh
+make test_wasm         # published tests against the live WASM artifact
+make test_wasm_local   # this working tree's tests against the live artifact
+```
+
+Both wrap `scripts/test-wasm.sh` (clones the WASM tester into `build/wasm-test/`
+and auto-detects the deployed catalog version; needs Node 18+). See
+[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#testing-the-deployed-wasm-build) for details.
+
 ---
 
 # DuckDB DGGS Function Reference
