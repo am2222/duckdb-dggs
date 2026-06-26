@@ -32,12 +32,14 @@ SELECT ST_IsValid(seqnum_to_boundary(2380, 5));
 ----
 true
 
-# The ring must be closed: first point equals last point
+# The ring must be closed: first point equals last point.
+# ST_PointN only has an INTEGER index overload, and ST_NPoints returns UINTEGER,
+# so the index is cast explicitly to keep this portable across spatial builds.
 query I
 SELECT ST_Equals(
-    ST_PointN(ST_ExteriorRing(seqnum_to_boundary(2380, 5)), 1),
+    ST_PointN(ST_ExteriorRing(seqnum_to_boundary(2380, 5)), 1::INTEGER),
     ST_PointN(ST_ExteriorRing(seqnum_to_boundary(2380, 5)),
-              ST_NPoints(seqnum_to_boundary(2380, 5)))
+              ST_NPoints(seqnum_to_boundary(2380, 5))::INTEGER)
 );
 ----
 true
@@ -57,18 +59,19 @@ true
 query I
 SELECT bool_and(
     ST_Distance(
-        ST_PointN(ST_ExteriorRing(seqnum_to_boundary(2380, 5)), v),
+        ST_PointN(ST_ExteriorRing(seqnum_to_boundary(2380, 5)), v::INTEGER),
         seqnum_to_geo(2380, 5)
     ) < 3.0
 ) FROM generate_series(1, 6) t(v);
 ----
 true
 
-# The polygon has exactly one ring (no holes in a DGGS cell)
+# A DGGS cell is a simple polygon with no holes: zero interior rings.
+# (ST_NRings is not present in all spatial builds; ST_NumInteriorRings is.)
 query I
-SELECT ST_NRings(seqnum_to_boundary(2380, 5));
+SELECT ST_NumInteriorRings(seqnum_to_boundary(2380, 5));
 ----
-1
+0
 
 # ── params overload ──────────────────────────────────────────
 
