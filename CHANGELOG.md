@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.8](https://github.com/am2222/duckdb-dggs/compare/v0.1.7...v0.1.8) (2026-06-26)
+
+
+### Features
+
+* **tests:** add WASM testing script and update Makefile for local tests ([ff39141](https://github.com/am2222/duckdb-dggs/commit/ff39141bde99a1614cc1795256bd626bc1671982))
+
+
+### Bug Fixes
+
+* **tests:** ensure compatibility with spatial builds by casting indices ([0b24be0](https://github.com/am2222/duckdb-dggs/commit/0b24be0d3eb890b5adf547666b2bdf2ce5eff132))
+* update DuckDB version and CI tools in the main distribution pipeline ([bff3d87](https://github.com/am2222/duckdb-dggs/commit/bff3d87413a0daa36437af2eceb523c173347a99))
+* update DuckDB version to v1.5-variegata in CI workflows and release notes ([85ea984](https://github.com/am2222/duckdb-dggs/commit/85ea984c459d1abedd8f769bf676b5379045db45))
+
 ## [0.1.7](https://github.com/am2222/duckdb-dggs/compare/v0.1.6...v0.1.7) (2026-05-02)
 
 
