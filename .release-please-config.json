@@ -4,6 +4,11 @@
   "bump-minor-pre-major": true,
   "bump-patch-for-minor-pre-major": true,
   "packages": {
-    ".": {}
+    ".": {
+      "extra-files": [
+        "CMakeLists.txt",
+        { "type": "generic", "path": "description.yml" }
+      ]
+    }
   }
 }

@@ -13,11 +13,10 @@
 
 #include "igeo7_functions.hpp"
 
-#include "duckdb/catalog/default/default_functions.hpp"
+#include "duck_dggs_compat.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/vector_operations/generic_executor.hpp"
 #include "duckdb/function/scalar_function.hpp"
-#include "duckdb/parser/parsed_data/create_macro_info.hpp"
 
 #include "library.h"
 #include "auth/authalic.hpp"
@@ -127,14 +126,14 @@ void GetNeighboursFunction(DataChunk &args, ExpressionState &, Vector &result) {
 
   // Flatten so FlatVector::GetData is safe for any input vector shape
   // (e.g. CONSTANT_VECTOR from constant folding).
-  input.Flatten(count);
+  FlattenVector(input, count);
 
-  auto *list_entries = ListVector::GetData(result);
-  auto &child = ListVector::GetEntry(result);
+  auto *list_entries = ListEntriesMutable(result);
+  auto &child = ListChildMutable(result);
   ListVector::SetListSize(result, count * 6);
 
   auto input_data = FlatVector::GetData<uint64_t>(input);
-  auto child_data = FlatVector::GetData<uint64_t>(child);
+  auto child_data = MutableData<uint64_t>(child);
   auto &input_validity = FlatVector::Validity(input);
 
   for (idx_t i = 0; i < count; i++) {
@@ -200,8 +199,8 @@ void EncodeFunction(DataChunk &args, ExpressionState &, Vector &result) {
 
   const idx_t count = args.size();
   result.SetVectorType(VectorType::FLAT_VECTOR);
-  auto *result_data = FlatVector::GetData<uint64_t>(result);
-  auto &result_validity = FlatVector::Validity(result);
+  auto *result_data = MutableData<uint64_t>(result);
+  auto &result_validity = MutableValidity(result);
 
   // Accept either UTINYINT (typed columns) or INTEGER (literal overload).
   auto read_val = [](const UnifiedVectorFormat &fmt, idx_t row_idx) -> int64_t {
@@ -214,11 +213,11 @@ void EncodeFunction(DataChunk &args, ExpressionState &, Vector &result) {
   };
 
   UnifiedVectorFormat base_fmt;
-  args.data[0].ToUnifiedFormat(count, base_fmt);
+  ToUnified(args.data[0], count, base_fmt);
 
   UnifiedVectorFormat digit_fmt[N_DIGITS];
   for (int k = 0; k < N_DIGITS; k++) {
-    args.data[k + 1].ToUnifiedFormat(count, digit_fmt[k]);
+    ToUnified(args.data[k + 1], count, digit_fmt[k]);
   }
 
   for (idx_t i = 0; i < count; i++) {
@@ -402,7 +401,7 @@ void AuthalicToGeoFunction(DataChunk &args, ExpressionState &, Vector &result) {
 // `res` are overwritten with 7 = padding). Equivalent to
 //   igeo7_parent_at(igeo7_encode(base, d1..d20), res)
 // but registered as a single scalar so it's available whenever the extension
-// is loaded (DuckDB's DefaultMacro caps parameters at 8; this has 22).
+// is loaded (DuckDB v1.5's DefaultMacro caps parameters at 8; this has 22).
 void EncodeAtResolutionFunction(DataChunk &args, ExpressionState &,
                                 Vector &result) {
   static constexpr int N_DIGITS = 20;
@@ -412,8 +411,8 @@ void EncodeAtResolutionFunction(DataChunk &args, ExpressionState &,
 
   const idx_t count = args.size();
   result.SetVectorType(VectorType::FLAT_VECTOR);
-  auto *result_data = FlatVector::GetData<uint64_t>(result);
-  auto &result_validity = FlatVector::Validity(result);
+  auto *result_data = MutableData<uint64_t>(result);
+  auto &result_validity = MutableValidity(result);
 
   auto read_val = [](const UnifiedVectorFormat &fmt, idx_t row_idx) -> int64_t {
     if (fmt.physical_type == PhysicalType::UINT8) {
@@ -425,14 +424,14 @@ void EncodeAtResolutionFunction(DataChunk &args, ExpressionState &,
   };
 
   UnifiedVectorFormat base_fmt;
-  args.data[0].ToUnifiedFormat(count, base_fmt);
+  ToUnified(args.data[0], count, base_fmt);
 
   UnifiedVectorFormat res_fmt;
-  args.data[1].ToUnifiedFormat(count, res_fmt);
+  ToUnified(args.data[1], count, res_fmt);
 
   UnifiedVectorFormat digit_fmt[N_DIGITS];
   for (int k = 0; k < N_DIGITS; k++) {
-    args.data[k + 2].ToUnifiedFormat(count, digit_fmt[k]);
+    ToUnified(args.data[k + 2], count, digit_fmt[k]);
   }
 
   for (idx_t i = 0; i < count; i++) {
@@ -480,6 +479,11 @@ void EncodeAtResolutionFunction(DataChunk &args, ExpressionState &,
 } // namespace
 
 void RegisterIGeo7Functions(ExtensionLoader &loader) {
+  // All of these can throw (malformed index strings, unsupported WKB, ...).
+  auto add = [&](ScalarFunction fn) {
+    loader.RegisterFunction(Fallible(std::move(fn)));
+  };
+
   const auto UB = LogicalType::UBIGINT;
   const auto I = LogicalType::INTEGER;
   const auto V = LogicalType::VARCHAR;
@@ -490,44 +494,33 @@ void RegisterIGeo7Functions(ExtensionLoader &loader) {
   // WGS84 geodetic ↔ authalic latitude conversion (Karney 2022 Fourier series)
   // applied to every vertex Y of a GEOMETRY. Useful before/after equal-area
   // operations on lon/lat data.
-  loader.RegisterFunction(ScalarFunction("igeo7_geo_to_authalic", {GEO}, GEO,
-                                         GeoToAuthalicFunction));
-  loader.RegisterFunction(ScalarFunction("igeo7_authalic_to_geo", {GEO}, GEO,
-                                         AuthalicToGeoFunction));
+  add(ScalarFunction("igeo7_geo_to_authalic", {GEO}, GEO,
+                     GeoToAuthalicFunction));
+  add(ScalarFunction("igeo7_authalic_to_geo", {GEO}, GEO,
+                     AuthalicToGeoFunction));
 
-  loader.RegisterFunction(
-      ScalarFunction("igeo7_get_resolution", {UB}, I, GetResolutionFunction));
+  add(ScalarFunction("igeo7_get_resolution", {UB}, I, GetResolutionFunction));
 
-  loader.RegisterFunction(
-      ScalarFunction("igeo7_get_base_cell", {UB}, UT, GetBaseCellFunction));
+  add(ScalarFunction("igeo7_get_base_cell", {UB}, UT, GetBaseCellFunction));
 
-  loader.RegisterFunction(
-      ScalarFunction("igeo7_get_digit", {UB, I}, UT, GetDigitFunction));
+  add(ScalarFunction("igeo7_get_digit", {UB, I}, UT, GetDigitFunction));
 
-  loader.RegisterFunction(
-      ScalarFunction("igeo7_parent_at", {UB, I}, UB, ParentAtFunction));
+  add(ScalarFunction("igeo7_parent_at", {UB, I}, UB, ParentAtFunction));
 
-  loader.RegisterFunction(
-      ScalarFunction("igeo7_parent", {UB}, UB, ParentFunction));
+  add(ScalarFunction("igeo7_parent", {UB}, UB, ParentFunction));
 
-  loader.RegisterFunction(
-      ScalarFunction("igeo7_to_string", {UB}, V, ToStringFunction));
+  add(ScalarFunction("igeo7_to_string", {UB}, V, ToStringFunction));
 
-  loader.RegisterFunction(
-      ScalarFunction("igeo7_from_string", {V}, UB, FromStringFunction));
+  add(ScalarFunction("igeo7_from_string", {V}, UB, FromStringFunction));
 
-  loader.RegisterFunction(ScalarFunction("igeo7_get_neighbours", {UB},
-                                         LogicalType::LIST(UB),
-                                         GetNeighboursFunction));
+  add(ScalarFunction("igeo7_get_neighbours", {UB}, LogicalType::LIST(UB),
+                     GetNeighboursFunction));
 
-  loader.RegisterFunction(
-      ScalarFunction("igeo7_get_neighbour", {UB, I}, UB, GetNeighbourFunction));
+  add(ScalarFunction("igeo7_get_neighbour", {UB, I}, UB, GetNeighbourFunction));
 
-  loader.RegisterFunction(
-      ScalarFunction("igeo7_first_non_zero", {UB}, I, FirstNonZeroFunction));
+  add(ScalarFunction("igeo7_first_non_zero", {UB}, I, FirstNonZeroFunction));
 
-  loader.RegisterFunction(
-      ScalarFunction("igeo7_is_valid", {UB}, BO, IsValidFunction));
+  add(ScalarFunction("igeo7_is_valid", {UB}, BO, IsValidFunction));
 
   // igeo7_encode: two overloads so untyped SQL literals (INTEGER) and typed
   // UTINYINT columns both bind cleanly. Values are masked to field widths
@@ -539,13 +532,13 @@ void RegisterIGeo7Functions(ExtensionLoader &loader) {
     for (int i = 0; i < 20; i++) {
       encode_args.push_back(digit_type); // d1..d20
     }
-    loader.RegisterFunction(ScalarFunction(
-        "igeo7_encode", std::move(encode_args), UB, EncodeFunction));
+    add(ScalarFunction("igeo7_encode", std::move(encode_args), UB,
+                       EncodeFunction));
   }
 
   // igeo7_encode_at_resolution: (base, res, d1..d20). Registered as C++
-  // rather than a SQL macro because DuckDB's DefaultMacro caps parameters at
-  // 8 and this signature has 22.
+  // rather than a SQL macro because DuckDB v1.5's DefaultMacro caps
+  // parameters at 8 and this signature has 22.
   for (auto digit_type : {UT, I}) {
     vector<LogicalType> args_vec;
     args_vec.reserve(22);
@@ -554,9 +547,8 @@ void RegisterIGeo7Functions(ExtensionLoader &loader) {
     for (int i = 0; i < 20; i++) {
       args_vec.push_back(digit_type); // d1..d20
     }
-    loader.RegisterFunction(ScalarFunction("igeo7_encode_at_resolution",
-                                           std::move(args_vec), UB,
-                                           EncodeAtResolutionFunction));
+    add(ScalarFunction("igeo7_encode_at_resolution", std::move(args_vec), UB,
+                       EncodeAtResolutionFunction));
   }
 
   // ── SQL companion macros ────────────────────────────────────────────────
@@ -564,13 +556,10 @@ void RegisterIGeo7Functions(ExtensionLoader &loader) {
   // repository (https://github.com/allixender/igeo7_duckdb) so the full
   // convenience surface is available without a separate .read step.
   // `igeo7_encode_at_resolution` is implemented above as a C++ scalar
-  // (22 parameters; DefaultMacro caps at 8).
-  static const DefaultMacro IGEO7_MACROS[] = {
-      {DEFAULT_SCHEMA,
-       "igeo7_decode_str",
-       {"raw", nullptr},
-       {{nullptr, nullptr}},
-       // Verbose "B-d1.d2...d20" form (all 20 slots incl. padding 7s).
+  // (22 parameters; v1.5's DefaultMacro caps at 8).
+  static const SqlMacro IGEO7_MACROS[] = {
+      // Verbose "B-d1.d2...d20" form (all 20 slots incl. padding 7s).
+      {"igeo7_decode_str", "raw",
        "CONCAT("
        "  (raw >> 60::UBIGINT) & 15::UBIGINT, '-',"
        "  (raw >> 57::UBIGINT) & 7, '.', (raw >> 54::UBIGINT) & 7, '.',"
@@ -583,26 +572,13 @@ void RegisterIGeo7Functions(ExtensionLoader &loader) {
        "  (raw >> 15::UBIGINT) & 7, '.', (raw >> 12::UBIGINT) & 7, '.',"
        "  (raw >>  9::UBIGINT) & 7, '.', (raw >>  6::UBIGINT) & 7, '.',"
        "  (raw >>  3::UBIGINT) & 7, '.', (raw >>  0::UBIGINT) & 7)"},
-      {DEFAULT_SCHEMA,
-       "igeo7_string_parent",
-       {"s", nullptr},
-       {{nullptr, nullptr}},
-       "s[1:LENGTH(s) - 1]"},
-      {DEFAULT_SCHEMA,
-       "igeo7_string_local_pos",
-       {"s", nullptr},
-       {{nullptr, nullptr}},
-       "s[LENGTH(s):LENGTH(s)]"},
-      {DEFAULT_SCHEMA,
-       "igeo7_string_is_center",
-       {"s", nullptr},
-       {{nullptr, nullptr}},
-       "s[LENGTH(s):LENGTH(s)] = '0'"},
-      {nullptr, nullptr, {nullptr}, {{nullptr, nullptr}}, nullptr}};
+      {"igeo7_string_parent", "s", "s[1:LENGTH(s) - 1]"},
+      {"igeo7_string_local_pos", "s", "s[LENGTH(s):LENGTH(s)]"},
+      {"igeo7_string_is_center", "s", "s[LENGTH(s):LENGTH(s)] = '0'"},
+  };
 
-  for (idx_t i = 0; IGEO7_MACROS[i].name != nullptr; i++) {
-    auto info =
-        DefaultFunctionGenerator::CreateInternalMacroInfo(IGEO7_MACROS[i]);
+  for (const auto &macro : IGEO7_MACROS) {
+    auto info = MakeMacroInfo(macro);
     loader.RegisterFunction(*info);
   }
 }
