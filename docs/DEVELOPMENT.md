@@ -97,7 +97,7 @@ from conventional commits on `main` (`.github/workflows/release-please.yml`):
    that copies this repo's `description.yml` with `repo.ref` set to the release
    commit. `description.yml` here is the source of truth for the listing.
 
-Steps 2 and 3 need the `RELEASE_PLEASE_TOKEN` repository secret: a classic
+Steps 2 and 3 need the `RELEASE_PAT` repository secret: a classic
 personal access token with the `public_repo` scope and push access to the
 fork. Tags created with the default `GITHUB_TOKEN` do not trigger other
 workflows, so without it the release would ship with no binaries and no

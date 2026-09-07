@@ -13,7 +13,7 @@ permissions:
   contents: write
   pull-requests: write
 
-# RELEASE_PLEASE_TOKEN is a classic personal access token with the `public_repo`
+# RELEASE_PAT is a classic personal access token with the `public_repo`
 # scope. It is needed for two reasons:
 #   1. Tags and releases created with the default GITHUB_TOKEN do not trigger other
 #      workflows, so the tag-triggered release job in MainDistributionPipeline.yml
@@ -37,7 +37,7 @@ jobs:
         with:
           config-file: .release-please-config.json
           manifest-file: .release-please-manifest.json
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
 
   # Open a PR against duckdb/community-extensions pointing at the new release. Runs in
   # the same workflow run as release-please (rather than on a `release:` trigger) so it
@@ -50,7 +50,7 @@ jobs:
     permissions:
       contents: read
     env:
-      GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+      GH_TOKEN: ${{ secrets.RELEASE_PAT }}
       UPSTREAM: duckdb/community-extensions
       FORK: am2222/community-extensions
       EXT_NAME: duck_dggs
@@ -58,10 +58,10 @@ jobs:
       TAG: ${{ needs.release-please.outputs.tag_name }}
       SHA: ${{ needs.release-please.outputs.sha }}
     steps:
-      - name: Check for RELEASE_PLEASE_TOKEN
+      - name: Check for RELEASE_PAT
         run: |
           if [ -z "$GH_TOKEN" ]; then
-            echo "::error::RELEASE_PLEASE_TOKEN secret is not set; cannot push to $FORK or open a PR on $UPSTREAM."
+            echo "::error::RELEASE_PAT secret is not set; cannot push to $FORK or open a PR on $UPSTREAM."
             exit 1
           fi
 
@@ -79,7 +79,7 @@ jobs:
           repository: ${{ env.UPSTREAM }}
           ref: main
           path: community-extensions
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          token: ${{ secrets.RELEASE_PAT }}
 
       - name: Update description.yml
         working-directory: community-extensions
