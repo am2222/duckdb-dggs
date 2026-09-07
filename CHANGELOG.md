@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.9](https://github.com/am2222/duckdb-dggs/compare/v0.1.8...v0.1.9) (2026-09-07)
+
+
+### Bug Fixes
+
+* update references from RELEASE_PLEASE_TOKEN to RELEASE_PAT in workflows and documentation ([7886761](https://github.com/am2222/duckdb-dggs/commit/788676191846f613d71600e977b208d815cc173c))
+
 ## [0.1.8](https://github.com/am2222/duckdb-dggs/compare/v0.1.7...v0.1.8) (2026-06-26)
 
 
