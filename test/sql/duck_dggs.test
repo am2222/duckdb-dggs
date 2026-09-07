@@ -939,7 +939,7 @@ SELECT igeo7_get_resolution(
 query I
 SELECT list_transform(
     igeo7_get_neighbours(igeo7_from_string('0800432')),
-    x -> igeo7_to_string(x))
+    lambda x: igeo7_to_string(x))
     = ['0800433', '0800651', '0800064', '0800436', '0800430', '0800655'];
 ----
 true

@@ -7,36 +7,11 @@
 #include "duckdb/common/exception.hpp"
 #include "duckdb/function/scalar_function.hpp"
 #include "duckdb/execution/expression_executor.hpp"
-// StructVector moved to its own header in DuckDB v1.6+; fall back to vector.hpp
-// for v1.5
-#if __has_include("duckdb/common/vector/struct_vector.hpp")
-#include "duckdb/common/vector/struct_vector.hpp"
-#else
-#include "duckdb/common/types/vector.hpp"
-#endif
-#if __has_include("duckdb/common/vector/list_vector.hpp")
-#include "duckdb/common/vector/list_vector.hpp"
-#endif
+#include "duck_dggs_compat.hpp"
 #include <duckdb/parser/parsed_data/create_scalar_function_info.hpp>
 #include <dglib/DgBase.h>
 
 namespace duckdb {
-
-// ---------------------------------------------------------------------------
-// Cross-version helper: StructVector::GetEntries returns vector<Vector> in
-// v1.6+ and vector<unique_ptr<Vector>> in v1.5.1.  Both overloads compile;
-// only one will match given the actual return type of GetEntries.
-// ---------------------------------------------------------------------------
-#if __has_include("duckdb/common/vector/struct_vector.hpp")
-static inline Vector &GetStructEntry(vector<Vector> &entries, idx_t i) {
-  return entries[i];
-}
-#else
-static inline Vector &GetStructEntry(vector<unique_ptr<Vector>> &entries,
-                                     idx_t i) {
-  return *entries[i];
-}
-#endif
 
 // ===========================================================================
 // Return type helpers
@@ -109,12 +84,12 @@ static LogicalType ResInfoType() {
 
 static void WriteResInfo(Vector &result, idx_t i, const dggrid::ResInfo &r) {
   auto &entries = StructVector::GetEntries(result);
-  FlatVector::GetData<int32_t>(GetStructEntry(entries, 0))[i] =
+  MutableData<int32_t>(GetStructEntry(entries, 0))[i] =
       static_cast<int32_t>(r.res);
-  FlatVector::GetData<uint64_t>(GetStructEntry(entries, 1))[i] = r.cells;
-  FlatVector::GetData<double>(GetStructEntry(entries, 2))[i] = r.area_km;
-  FlatVector::GetData<double>(GetStructEntry(entries, 3))[i] = r.spacing_km;
-  FlatVector::GetData<double>(GetStructEntry(entries, 4))[i] = r.cls_km;
+  MutableData<uint64_t>(GetStructEntry(entries, 1))[i] = r.cells;
+  MutableData<double>(GetStructEntry(entries, 2))[i] = r.area_km;
+  MutableData<double>(GetStructEntry(entries, 3))[i] = r.spacing_km;
+  MutableData<double>(GetStructEntry(entries, 4))[i] = r.cls_km;
 }
 
 static LogicalType Vertex2DDType() {
@@ -130,11 +105,11 @@ static LogicalType Vertex2DDType() {
 static void WriteVertex2DD(Vector &result, idx_t i,
                            const dggrid::Vertex2DDCoord &c) {
   auto &entries = StructVector::GetEntries(result);
-  FlatVector::GetData<bool>(GetStructEntry(entries, 0))[i] = c.keep;
-  FlatVector::GetData<int32_t>(GetStructEntry(entries, 1))[i] = c.vertNum;
-  FlatVector::GetData<int32_t>(GetStructEntry(entries, 2))[i] = c.triNum;
-  FlatVector::GetData<double>(GetStructEntry(entries, 3))[i] = c.x;
-  FlatVector::GetData<double>(GetStructEntry(entries, 4))[i] = c.y;
+  MutableData<bool>(GetStructEntry(entries, 0))[i] = c.keep;
+  MutableData<int32_t>(GetStructEntry(entries, 1))[i] = c.vertNum;
+  MutableData<int32_t>(GetStructEntry(entries, 2))[i] = c.triNum;
+  MutableData<double>(GetStructEntry(entries, 3))[i] = c.x;
+  MutableData<double>(GetStructEntry(entries, 4))[i] = c.y;
 }
 
 // ===========================================================================
@@ -151,35 +126,35 @@ static void WriteGeo(Vector &result, idx_t i, const dggrid::GeoCoord &c) {
   memcpy(data + 5, &c.lon_deg, sizeof(double));
   memcpy(data + 13, &c.lat_deg, sizeof(double));
   str.Finalize();
-  FlatVector::GetData<string_t>(result)[i] = str;
+  MutableData<string_t>(result)[i] = str;
 }
 
 static void WritePlane(Vector &result, idx_t i, const dggrid::PlaneCoord &c) {
   auto &entries = StructVector::GetEntries(result);
-  FlatVector::GetData<double>(GetStructEntry(entries, 0))[i] = c.x;
-  FlatVector::GetData<double>(GetStructEntry(entries, 1))[i] = c.y;
+  MutableData<double>(GetStructEntry(entries, 0))[i] = c.x;
+  MutableData<double>(GetStructEntry(entries, 1))[i] = c.y;
 }
 
 static void WriteProjTri(Vector &result, idx_t i,
                          const dggrid::ProjTriCoord &c) {
   auto &entries = StructVector::GetEntries(result);
-  FlatVector::GetData<uint64_t>(GetStructEntry(entries, 0))[i] = c.tnum;
-  FlatVector::GetData<double>(GetStructEntry(entries, 1))[i] = c.x;
-  FlatVector::GetData<double>(GetStructEntry(entries, 2))[i] = c.y;
+  MutableData<uint64_t>(GetStructEntry(entries, 0))[i] = c.tnum;
+  MutableData<double>(GetStructEntry(entries, 1))[i] = c.x;
+  MutableData<double>(GetStructEntry(entries, 2))[i] = c.y;
 }
 
 static void WriteQ2DD(Vector &result, idx_t i, const dggrid::Q2DDCoord &c) {
   auto &entries = StructVector::GetEntries(result);
-  FlatVector::GetData<uint64_t>(GetStructEntry(entries, 0))[i] = c.quad;
-  FlatVector::GetData<double>(GetStructEntry(entries, 1))[i] = c.x;
-  FlatVector::GetData<double>(GetStructEntry(entries, 2))[i] = c.y;
+  MutableData<uint64_t>(GetStructEntry(entries, 0))[i] = c.quad;
+  MutableData<double>(GetStructEntry(entries, 1))[i] = c.x;
+  MutableData<double>(GetStructEntry(entries, 2))[i] = c.y;
 }
 
 static void WriteQ2DI(Vector &result, idx_t i, const dggrid::Q2DICoord &c) {
   auto &entries = StructVector::GetEntries(result);
-  FlatVector::GetData<uint64_t>(GetStructEntry(entries, 0))[i] = c.quad;
-  FlatVector::GetData<int64_t>(GetStructEntry(entries, 1))[i] = c.i;
-  FlatVector::GetData<int64_t>(GetStructEntry(entries, 2))[i] = c.j;
+  MutableData<uint64_t>(GetStructEntry(entries, 0))[i] = c.quad;
+  MutableData<int64_t>(GetStructEntry(entries, 1))[i] = c.i;
+  MutableData<int64_t>(GetStructEntry(entries, 2))[i] = c.j;
 }
 
 // Write a WKB Polygon (single exterior ring, open vertex list — we close it).
@@ -214,7 +189,7 @@ static void WriteWKBPolygon(Vector &result, idx_t i,
   off += 8;
   memcpy(d + off, &verts[0].lat_deg, 8);
   str.Finalize();
-  FlatVector::GetData<string_t>(result)[i] = str;
+  MutableData<string_t>(result)[i] = str;
 }
 
 // ===========================================================================
@@ -226,7 +201,7 @@ template <typename T> struct ArgReader {
   const T *data;
 
   ArgReader(DataChunk &args, idx_t col, idx_t count) {
-    args.data[col].ToUnifiedFormat(count, fmt);
+    ToUnified(args.data[col], count, fmt);
     data = UnifiedVectorFormat::GetData<T>(fmt);
   }
 
@@ -245,21 +220,21 @@ struct ParamsReader {
 
   ParamsReader(Vector &params_vec, idx_t count) {
     auto &e = StructVector::GetEntries(params_vec);
-    GetStructEntry(e, 0).ToUnifiedFormat(count, proj_fmt);
+    ToUnified(GetStructEntry(e, 0), count, proj_fmt);
     proj_data = UnifiedVectorFormat::GetData<string_t>(proj_fmt);
-    GetStructEntry(e, 1).ToUnifiedFormat(count, apt_fmt);
+    ToUnified(GetStructEntry(e, 1), count, apt_fmt);
     apt_data = UnifiedVectorFormat::GetData<int32_t>(apt_fmt);
-    GetStructEntry(e, 2).ToUnifiedFormat(count, topo_fmt);
+    ToUnified(GetStructEntry(e, 2), count, topo_fmt);
     topo_data = UnifiedVectorFormat::GetData<string_t>(topo_fmt);
-    GetStructEntry(e, 3).ToUnifiedFormat(count, az_fmt);
+    ToUnified(GetStructEntry(e, 3), count, az_fmt);
     az_data = UnifiedVectorFormat::GetData<double>(az_fmt);
-    GetStructEntry(e, 4).ToUnifiedFormat(count, plat_fmt);
+    ToUnified(GetStructEntry(e, 4), count, plat_fmt);
     plat_data = UnifiedVectorFormat::GetData<double>(plat_fmt);
-    GetStructEntry(e, 5).ToUnifiedFormat(count, plon_fmt);
+    ToUnified(GetStructEntry(e, 5), count, plon_fmt);
     plon_data = UnifiedVectorFormat::GetData<double>(plon_fmt);
-    GetStructEntry(e, 6).ToUnifiedFormat(count, is_apseq_fmt);
+    ToUnified(GetStructEntry(e, 6), count, is_apseq_fmt);
     is_apseq_data = UnifiedVectorFormat::GetData<bool>(is_apseq_fmt);
-    GetStructEntry(e, 7).ToUnifiedFormat(count, apseq_fmt);
+    ToUnified(GetStructEntry(e, 7), count, apseq_fmt);
     apseq_data = UnifiedVectorFormat::GetData<string_t>(apseq_fmt);
   }
 
@@ -295,8 +270,9 @@ static void DggsParamsFun(DataChunk &args, ExpressionState &, Vector &result) {
   for (idx_t i = 0; i < 6; i++) {
     GetStructEntry(entries, i).Reference(args.data[i]);
   }
-  GetStructEntry(entries, 6).Reference(Value::BOOLEAN(false));
-  GetStructEntry(entries, 7).Reference(Value(""));
+  ReferenceValue(GetStructEntry(entries, 6), Value::BOOLEAN(false),
+                 args.size());
+  ReferenceValue(GetStructEntry(entries, 7), Value(""), args.size());
 }
 
 // 8-arg overload: includes aperture sequence
@@ -312,11 +288,12 @@ static void DggsParamsApSeqFun(DataChunk &args, ExpressionState &,
 // version
 // ===========================================================================
 
-static void DuckDggsVersionFun(DataChunk &, ExpressionState &, Vector &result) {
+static void DuckDggsVersionFun(DataChunk &args, ExpressionState &,
+                               Vector &result) {
   auto ext_version = DuckDggsExtension().Version();
   std::string version = (ext_version.empty() ? "unknown" : ext_version);
   version += " (DGGRID " DGGRID_VERSION ")";
-  result.Reference(Value(version));
+  ReferenceValue(result, Value(version), args.size());
 }
 
 // ===========================================================================
@@ -338,7 +315,7 @@ static void GeoToSeqNumParamsFun(DataChunk &args, ExpressionState &,
   ArgReader<string_t> geom(args, 0, n);
   ArgReader<int32_t> res(args, 1, n);
   ParamsReader params(args.data[2], n);
-  auto *out = FlatVector::GetData<uint64_t>(result);
+  auto *out = MutableData<uint64_t>(result);
   for (idx_t i = 0; i < n; i++) {
     double lon, lat;
     ReadPointXY(geom[i], lon, lat);
@@ -609,7 +586,7 @@ static void ProjTriToSeqNumFun(DataChunk &args, ExpressionState &,
   ArgReader<uint64_t> tnum(args, 0, n);
   ArgReader<double> x(args, 1, n), y(args, 2, n);
   ArgReader<int32_t> res(args, 3, n);
-  auto *out = FlatVector::GetData<uint64_t>(result);
+  auto *out = MutableData<uint64_t>(result);
   for (idx_t i = 0; i < n; i++)
     out[i] =
         dggrid::projTriToSeqNum(paramsWithRes(res[i]), tnum[i], x[i], y[i]);
@@ -621,7 +598,7 @@ static void ProjTriToSeqNumParamsFun(DataChunk &args, ExpressionState &,
   ArgReader<double> x(args, 1, n), y(args, 2, n);
   ArgReader<int32_t> res(args, 3, n);
   ParamsReader params(args.data[4], n);
-  auto *out = FlatVector::GetData<uint64_t>(result);
+  auto *out = MutableData<uint64_t>(result);
   for (idx_t i = 0; i < n; i++) {
     auto p = params[i];
     p.res = res[i];
@@ -756,7 +733,7 @@ static void Q2DDToSeqNumFun(DataChunk &args, ExpressionState &,
   ArgReader<uint64_t> quad(args, 0, n);
   ArgReader<double> x(args, 1, n), y(args, 2, n);
   ArgReader<int32_t> res(args, 3, n);
-  auto *out = FlatVector::GetData<uint64_t>(result);
+  auto *out = MutableData<uint64_t>(result);
   for (idx_t i = 0; i < n; i++)
     out[i] = dggrid::q2DDToSeqNum(paramsWithRes(res[i]), quad[i], x[i], y[i]);
 }
@@ -767,7 +744,7 @@ static void Q2DDToSeqNumParamsFun(DataChunk &args, ExpressionState &,
   ArgReader<double> x(args, 1, n), y(args, 2, n);
   ArgReader<int32_t> res(args, 3, n);
   ParamsReader params(args.data[4], n);
-  auto *out = FlatVector::GetData<uint64_t>(result);
+  auto *out = MutableData<uint64_t>(result);
   for (idx_t i = 0; i < n; i++) {
     auto p = params[i];
     p.res = res[i];
@@ -903,7 +880,7 @@ static void Q2DIToSeqNumFun(DataChunk &args, ExpressionState &,
   ArgReader<uint64_t> quad(args, 0, n);
   ArgReader<int64_t> ai(args, 1, n), aj(args, 2, n);
   ArgReader<int32_t> res(args, 3, n);
-  auto *out = FlatVector::GetData<uint64_t>(result);
+  auto *out = MutableData<uint64_t>(result);
   for (idx_t i = 0; i < n; i++)
     out[i] = dggrid::q2DIToSeqNum(paramsWithRes(res[i]), quad[i], ai[i], aj[i]);
 }
@@ -914,7 +891,7 @@ static void Q2DIToSeqNumParamsFun(DataChunk &args, ExpressionState &,
   ArgReader<int64_t> ai(args, 1, n), aj(args, 2, n);
   ArgReader<int32_t> res(args, 3, n);
   ParamsReader params(args.data[4], n);
-  auto *out = FlatVector::GetData<uint64_t>(result);
+  auto *out = MutableData<uint64_t>(result);
   for (idx_t i = 0; i < n; i++) {
     auto p = params[i];
     p.res = res[i];
@@ -1070,7 +1047,7 @@ static void SeqNumToSeqNumParamsFun(DataChunk &args, ExpressionState &,
   ArgReader<uint64_t> seqnum(args, 0, n);
   ArgReader<int32_t> res(args, 1, n);
   ParamsReader params(args.data[2], n);
-  auto *out = FlatVector::GetData<uint64_t>(result);
+  auto *out = MutableData<uint64_t>(result);
   for (idx_t i = 0; i < n; i++) {
     auto p = params[i];
     p.res = res[i];
@@ -1103,7 +1080,7 @@ static void DggsResInfoParamsFun(DataChunk &args, ExpressionState &,
 static void DggsNCellsFun(DataChunk &args, ExpressionState &, Vector &result) {
   idx_t n = args.size();
   ArgReader<int32_t> res(args, 0, n);
-  auto *out = FlatVector::GetData<uint64_t>(result);
+  auto *out = MutableData<uint64_t>(result);
   for (idx_t i = 0; i < n; i++)
     out[i] = dggrid::getResAt(paramsWithRes(res[i]), res[i]).cells;
 }
@@ -1112,7 +1089,7 @@ static void DggsNCellsParamsFun(DataChunk &args, ExpressionState &,
   idx_t n = args.size();
   ArgReader<int32_t> res(args, 0, n);
   ParamsReader params(args.data[1], n);
-  auto *out = FlatVector::GetData<uint64_t>(result);
+  auto *out = MutableData<uint64_t>(result);
   for (idx_t i = 0; i < n; i++) {
     auto p = params[i];
     p.res = res[i];
@@ -1124,7 +1101,7 @@ static void DggsCellAreaKMFun(DataChunk &args, ExpressionState &,
                               Vector &result) {
   idx_t n = args.size();
   ArgReader<int32_t> res(args, 0, n);
-  auto *out = FlatVector::GetData<double>(result);
+  auto *out = MutableData<double>(result);
   for (idx_t i = 0; i < n; i++)
     out[i] = dggrid::getResAt(paramsWithRes(res[i]), res[i]).area_km;
 }
@@ -1133,7 +1110,7 @@ static void DggsCellAreaKMParamsFun(DataChunk &args, ExpressionState &,
   idx_t n = args.size();
   ArgReader<int32_t> res(args, 0, n);
   ParamsReader params(args.data[1], n);
-  auto *out = FlatVector::GetData<double>(result);
+  auto *out = MutableData<double>(result);
   for (idx_t i = 0; i < n; i++) {
     auto p = params[i];
     p.res = res[i];
@@ -1145,7 +1122,7 @@ static void DggsCellDistKMFun(DataChunk &args, ExpressionState &,
                               Vector &result) {
   idx_t n = args.size();
   ArgReader<int32_t> res(args, 0, n);
-  auto *out = FlatVector::GetData<double>(result);
+  auto *out = MutableData<double>(result);
   for (idx_t i = 0; i < n; i++)
     out[i] = dggrid::getResAt(paramsWithRes(res[i]), res[i]).spacing_km;
 }
@@ -1154,7 +1131,7 @@ static void DggsCellDistKMParamsFun(DataChunk &args, ExpressionState &,
   idx_t n = args.size();
   ArgReader<int32_t> res(args, 0, n);
   ParamsReader params(args.data[1], n);
-  auto *out = FlatVector::GetData<double>(result);
+  auto *out = MutableData<double>(result);
   for (idx_t i = 0; i < n; i++) {
     auto p = params[i];
     p.res = res[i];
@@ -1165,7 +1142,7 @@ static void DggsCellDistKMParamsFun(DataChunk &args, ExpressionState &,
 static void DggsClsKMFun(DataChunk &args, ExpressionState &, Vector &result) {
   idx_t n = args.size();
   ArgReader<int32_t> res(args, 0, n);
-  auto *out = FlatVector::GetData<double>(result);
+  auto *out = MutableData<double>(result);
   for (idx_t i = 0; i < n; i++)
     out[i] = dggrid::getResAt(paramsWithRes(res[i]), res[i]).cls_km;
 }
@@ -1174,7 +1151,7 @@ static void DggsClsKMParamsFun(DataChunk &args, ExpressionState &,
   idx_t n = args.size();
   ArgReader<int32_t> res(args, 0, n);
   ParamsReader params(args.data[1], n);
-  auto *out = FlatVector::GetData<double>(result);
+  auto *out = MutableData<double>(result);
   for (idx_t i = 0; i < n; i++) {
     auto p = params[i];
     p.res = res[i];
@@ -1200,9 +1177,9 @@ static void SeqNumNeighborsFun(DataChunk &args, ExpressionState &,
   }
 
   ListVector::Reserve(result, total);
-  auto list_entries = ListVector::GetData(result);
-  auto &child = ListVector::GetEntry(result);
-  auto child_data = FlatVector::GetData<uint64_t>(child);
+  auto list_entries = ListEntriesMutable(result);
+  auto &child = ListChildMutable(result);
+  auto child_data = MutableData<uint64_t>(child);
   idx_t offset = 0;
   for (idx_t i = 0; i < n; i++) {
     list_entries[i].offset = offset;
@@ -1229,9 +1206,9 @@ static void SeqNumNeighborsParamsFun(DataChunk &args, ExpressionState &,
   }
 
   ListVector::Reserve(result, total);
-  auto list_entries = ListVector::GetData(result);
-  auto &child = ListVector::GetEntry(result);
-  auto child_data = FlatVector::GetData<uint64_t>(child);
+  auto list_entries = ListEntriesMutable(result);
+  auto &child = ListChildMutable(result);
+  auto child_data = MutableData<uint64_t>(child);
   idx_t offset = 0;
   for (idx_t i = 0; i < n; i++) {
     list_entries[i].offset = offset;
@@ -1260,7 +1237,7 @@ static void SeqNumParentParamsFun(DataChunk &args, ExpressionState &,
   ArgReader<uint64_t> seqnum(args, 0, n);
   ArgReader<int32_t> res(args, 1, n);
   ParamsReader params(args.data[2], n);
-  auto *out = FlatVector::GetData<uint64_t>(result);
+  auto *out = MutableData<uint64_t>(result);
   for (idx_t i = 0; i < n; i++) {
     auto p = params[i];
     p.res = res[i];
@@ -1286,9 +1263,9 @@ static void SeqNumChildrenFun(DataChunk &args, ExpressionState &,
   }
 
   ListVector::Reserve(result, total);
-  auto list_entries = ListVector::GetData(result);
-  auto &child = ListVector::GetEntry(result);
-  auto child_data = FlatVector::GetData<uint64_t>(child);
+  auto list_entries = ListEntriesMutable(result);
+  auto &child = ListChildMutable(result);
+  auto child_data = MutableData<uint64_t>(child);
   idx_t offset = 0;
   for (idx_t i = 0; i < n; i++) {
     list_entries[i].offset = offset;
@@ -1315,9 +1292,9 @@ static void SeqNumChildrenParamsFun(DataChunk &args, ExpressionState &,
   }
 
   ListVector::Reserve(result, total);
-  auto list_entries = ListVector::GetData(result);
-  auto &child = ListVector::GetEntry(result);
-  auto child_data = FlatVector::GetData<uint64_t>(child);
+  auto list_entries = ListEntriesMutable(result);
+  auto &child = ListChildMutable(result);
+  auto child_data = MutableData<uint64_t>(child);
   idx_t offset = 0;
   for (idx_t i = 0; i < n; i++) {
     list_entries[i].offset = offset;
@@ -1348,7 +1325,7 @@ static void SeqNumToZOrderParamsFun(DataChunk &args, ExpressionState &,
   ArgReader<uint64_t> seqnum(args, 0, n);
   ArgReader<int32_t> res(args, 1, n);
   ParamsReader params(args.data[2], n);
-  auto *out = FlatVector::GetData<uint64_t>(result);
+  auto *out = MutableData<uint64_t>(result);
   for (idx_t i = 0; i < n; i++) {
     auto p = params[i];
     p.res = res[i];
@@ -1370,7 +1347,7 @@ static void ZOrderToSeqNumParamsFun(DataChunk &args, ExpressionState &,
   ArgReader<uint64_t> value(args, 0, n);
   ArgReader<int32_t> res(args, 1, n);
   ParamsReader params(args.data[2], n);
-  auto *out = FlatVector::GetData<uint64_t>(result);
+  auto *out = MutableData<uint64_t>(result);
   for (idx_t i = 0; i < n; i++) {
     auto p = params[i];
     p.res = res[i];
@@ -1393,7 +1370,7 @@ static void SeqNumToZ3ParamsFun(DataChunk &args, ExpressionState &,
   ArgReader<uint64_t> seqnum(args, 0, n);
   ArgReader<int32_t> res(args, 1, n);
   ParamsReader params(args.data[2], n);
-  auto *out = FlatVector::GetData<uint64_t>(result);
+  auto *out = MutableData<uint64_t>(result);
   for (idx_t i = 0; i < n; i++) {
     auto p = params[i];
     p.res = res[i];
@@ -1414,7 +1391,7 @@ static void Z3ToSeqNumParamsFun(DataChunk &args, ExpressionState &,
   ArgReader<uint64_t> value(args, 0, n);
   ArgReader<int32_t> res(args, 1, n);
   ParamsReader params(args.data[2], n);
-  auto *out = FlatVector::GetData<uint64_t>(result);
+  auto *out = MutableData<uint64_t>(result);
   for (idx_t i = 0; i < n; i++) {
     auto p = params[i];
     p.res = res[i];
@@ -1437,7 +1414,7 @@ static void SeqNumToZ7ParamsFun(DataChunk &args, ExpressionState &,
   ArgReader<uint64_t> seqnum(args, 0, n);
   ArgReader<int32_t> res(args, 1, n);
   ParamsReader params(args.data[2], n);
-  auto *out = FlatVector::GetData<uint64_t>(result);
+  auto *out = MutableData<uint64_t>(result);
   for (idx_t i = 0; i < n; i++) {
     auto p = params[i];
     p.res = res[i];
@@ -1458,7 +1435,7 @@ static void Z7ToSeqNumParamsFun(DataChunk &args, ExpressionState &,
   ArgReader<uint64_t> value(args, 0, n);
   ArgReader<int32_t> res(args, 1, n);
   ParamsReader params(args.data[2], n);
-  auto *out = FlatVector::GetData<uint64_t>(result);
+  auto *out = MutableData<uint64_t>(result);
   for (idx_t i = 0; i < n; i++) {
     auto p = params[i];
     p.res = res[i];
@@ -1484,9 +1461,9 @@ static void SeqNumAllParentsFun(DataChunk &args, ExpressionState &,
   }
 
   ListVector::Reserve(result, total);
-  auto list_entries = ListVector::GetData(result);
-  auto &child = ListVector::GetEntry(result);
-  auto child_data = FlatVector::GetData<uint64_t>(child);
+  auto list_entries = ListEntriesMutable(result);
+  auto &child = ListChildMutable(result);
+  auto child_data = MutableData<uint64_t>(child);
   idx_t offset = 0;
   for (idx_t i = 0; i < n; i++) {
     list_entries[i].offset = offset;
@@ -1513,9 +1490,9 @@ static void SeqNumAllParentsParamsFun(DataChunk &args, ExpressionState &,
   }
 
   ListVector::Reserve(result, total);
-  auto list_entries = ListVector::GetData(result);
-  auto &child = ListVector::GetEntry(result);
-  auto child_data = FlatVector::GetData<uint64_t>(child);
+  auto list_entries = ListEntriesMutable(result);
+  auto &child = ListChildMutable(result);
+  auto child_data = MutableData<uint64_t>(child);
   idx_t offset = 0;
   for (idx_t i = 0; i < n; i++) {
     list_entries[i].offset = offset;
@@ -1562,7 +1539,7 @@ static void Vertex2DDToSeqNumFun(DataChunk &args, ExpressionState &,
   ArgReader<int32_t> tri_num(args, 2, n);
   ArgReader<double> x(args, 3, n), y(args, 4, n);
   ArgReader<int32_t> res(args, 5, n);
-  auto *out = FlatVector::GetData<uint64_t>(result);
+  auto *out = MutableData<uint64_t>(result);
   for (idx_t i = 0; i < n; i++)
     out[i] = dggrid::vertex2DDToSeqNum(paramsWithRes(res[i]), keep[i],
                                        vert_num[i], tri_num[i], x[i], y[i]);
@@ -1576,7 +1553,7 @@ static void Vertex2DDToSeqNumParamsFun(DataChunk &args, ExpressionState &,
   ArgReader<double> x(args, 3, n), y(args, 4, n);
   ArgReader<int32_t> res(args, 5, n);
   ParamsReader params(args.data[6], n);
-  auto *out = FlatVector::GetData<uint64_t>(result);
+  auto *out = MutableData<uint64_t>(result);
   for (idx_t i = 0; i < n; i++) {
     auto p = params[i];
     p.res = res[i];
@@ -1633,12 +1610,14 @@ static void LoadInternal(ExtensionLoader &loader) {
   auto reg = [&](const char *name, vector<LogicalType> base_args,
                  const LogicalType &ret, scalar_function_t base_fn,
                  scalar_function_t params_fn) {
+    // Every transform can throw (bad resolution, unknown projection, ...).
     ScalarFunctionSet set(name);
-    set.AddFunction(ScalarFunction(name, base_args, ret, std::move(base_fn)));
+    set.AddFunction(
+        Fallible(ScalarFunction(name, base_args, ret, std::move(base_fn))));
     vector<LogicalType> ext_args = base_args;
     ext_args.push_back(PARAMS);
-    set.AddFunction(
-        ScalarFunction(name, std::move(ext_args), ret, std::move(params_fn)));
+    set.AddFunction(Fallible(
+        ScalarFunction(name, std::move(ext_args), ret, std::move(params_fn))));
     loader.RegisterFunction(set);
   };
 
