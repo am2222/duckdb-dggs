@@ -1628,21 +1628,28 @@ static void LoadInternal(ExtensionLoader &loader) {
     eight.push_back(BI);
     eight.push_back(V);
 
+    const vector<string> six_names = {"projection",   "aperture",
+                                      "topology",     "azimuth_deg",
+                                      "pole_lat_deg", "pole_lon_deg"};
+    vector<string> eight_names = six_names;
+    eight_names.push_back("is_aperture_sequence");
+    eight_names.push_back("aperture_sequence");
+
     ScalarFunctionSet params_set("dggs_params");
     // 6-arg overload (backward compatible)
-    params_set.AddFunction(
-        ScalarFunction("dggs_params", six, PARAMS, DggsParamsFun));
+    params_set.AddFunction(WithParameterNames(
+        ScalarFunction("dggs_params", six, PARAMS, DggsParamsFun), six_names));
     // 8-arg overload (with aperture sequence)
-    params_set.AddFunction(
-        ScalarFunction("dggs_params", eight, PARAMS, DggsParamsApSeqFun));
+    params_set.AddFunction(WithParameterNames(
+        ScalarFunction("dggs_params", eight, PARAMS, DggsParamsApSeqFun),
+        eight_names));
 
     CreateScalarFunctionInfo info(std::move(params_set));
     info.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
 
     FunctionDescription six_desc;
     six_desc.parameter_types = six;
-    six_desc.parameter_names = {"projection",  "aperture",     "topology",
-                                "azimuth_deg", "pole_lat_deg", "pole_lon_deg"};
+    six_desc.parameter_names = six_names;
     six_desc.description =
         "Builds the grid-configuration struct accepted as the optional last "
         "argument of every transform function, selecting the projection "
@@ -1654,8 +1661,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 
     FunctionDescription eight_desc = six_desc;
     eight_desc.parameter_types = std::move(eight);
-    eight_desc.parameter_names.push_back("is_aperture_sequence");
-    eight_desc.parameter_names.push_back("aperture_sequence");
+    eight_desc.parameter_names = eight_names;
     eight_desc.description =
         "Builds the grid-configuration struct accepted as the optional last "
         "argument of every transform function, with a mixed-aperture grid: "
@@ -1690,13 +1696,17 @@ static void LoadInternal(ExtensionLoader &loader) {
                  const LogicalType &ret, scalar_function_t base_fn,
                  scalar_function_t params_fn, const TransformDoc &doc) {
     // Every transform can throw (bad resolution, unknown projection, ...).
+    vector<string> ext_names = doc.parameter_names;
+    ext_names.push_back("params");
+
     ScalarFunctionSet set(name);
-    set.AddFunction(
-        Fallible(ScalarFunction(name, base_args, ret, std::move(base_fn))));
+    set.AddFunction(Fallible(WithParameterNames(
+        ScalarFunction(name, base_args, ret, std::move(base_fn)),
+        doc.parameter_names)));
     vector<LogicalType> ext_args = base_args;
     ext_args.push_back(PARAMS);
-    set.AddFunction(
-        Fallible(ScalarFunction(name, ext_args, ret, std::move(params_fn))));
+    set.AddFunction(Fallible(WithParameterNames(
+        ScalarFunction(name, ext_args, ret, std::move(params_fn)), ext_names)));
 
     CreateScalarFunctionInfo info(std::move(set));
     // What the bare RegisterFunction(ScalarFunctionSet) overload does
@@ -1717,7 +1727,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 
     FunctionDescription params_desc = base_desc;
     params_desc.parameter_types = std::move(ext_args);
-    params_desc.parameter_names.push_back("params");
+    params_desc.parameter_names = std::move(ext_names);
     params_desc.examples = {call + ", " + grid + ")"};
 
     info.descriptions.push_back(std::move(base_desc));

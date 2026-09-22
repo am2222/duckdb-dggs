@@ -107,6 +107,32 @@ inline ScalarFunction Fallible(ScalarFunction function) {
   return function;
 }
 
+// Put real parameter names on a function's signature.
+//
+// v2 builds a FunctionSignature for every function; the arguments-only
+// constructors auto-name the parameters "col0", "col1", ... Its
+// duckdb_functions() reads names from that signature and only falls back to
+// FunctionDescription::parameter_names when the counts disagree, which they
+// never do -- so without this the catalog reports col0/col1 and the
+// descriptions' names are silently dropped.
+//
+// v1.5 has no names in the signature at all; FunctionDescription is the only
+// source there, so this is a no-op.
+inline ScalarFunction WithParameterNames(ScalarFunction function,
+                                         const vector<string> &names) {
+#if DUCK_DGGS_DUCKDB_V2
+  auto &signature = function.GetSignature();
+  const idx_t count =
+      MinValue<idx_t>(signature.GetParameterCount(), names.size());
+  for (idx_t i = 0; i < count; i++) {
+    signature.GetParameter(i).SetName(Identifier(names[i]));
+  }
+#else
+  (void)names;
+#endif
+  return function;
+}
+
 // A single-parameter SQL macro, expressed independently of the DuckDB
 // version.  v1.5's DefaultMacro takes separate parameter / body arrays; v2's
 // takes one "(params) AS body" string that it hands to the parser.

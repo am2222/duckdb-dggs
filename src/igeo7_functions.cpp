@@ -494,8 +494,9 @@ void RegisterIGeo7Functions(ExtensionLoader &loader) {
                  const LogicalType &return_type, scalar_function_t fn,
                  vector<string> parameter_names, const char *description,
                  const char *example) {
-    CreateScalarFunctionInfo info(
-        Fallible(ScalarFunction(name, arg_types, return_type, std::move(fn))));
+    CreateScalarFunctionInfo info(Fallible(WithParameterNames(
+        ScalarFunction(name, arg_types, return_type, std::move(fn)),
+        parameter_names)));
     // What the bare RegisterFunction(ScalarFunction) overload does
     // internally; CreateInfo itself defaults to ERROR_ON_CONFLICT.
     info.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
@@ -612,7 +613,8 @@ void RegisterIGeo7Functions(ExtensionLoader &loader) {
       for (int i = 0; i < 20; i++) {
         arg_types.push_back(digit_type); // d1..d20
       }
-      set.AddFunction(Fallible(ScalarFunction(name, arg_types, UB, fn)));
+      set.AddFunction(Fallible(
+          WithParameterNames(ScalarFunction(name, arg_types, UB, fn), names)));
       signatures.push_back(std::move(arg_types));
     }
 
