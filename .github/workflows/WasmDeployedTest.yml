@@ -1,0 +1,74 @@
+#
+# Test the *deployed* duck_dggs WASM artifact on the haybarn R2 catalog.
+#
+# This does NOT test the current commit — the published artifact lags this repo
+# by however long it takes a release to reach community-extensions. What it
+# catches is the deployment rotting underneath us: the catalog version being
+# retired, the wasm engine moving on, or a dependency (spatial) changing
+# behaviour. Those break users without any push to this repo, which is why the
+# primary trigger is a schedule rather than a push.
+#
+name: WASM Deployed Test
+
+on:
+  schedule:
+    # Mondays 06:00 UTC.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+    inputs:
+      engine_version:
+        description: 'Force the R2 catalog version (e.g. v1.5.5). Blank = auto-detect.'
+        required: false
+        default: ''
+      engine_pkg:
+        description: 'npm version of @haybarn/haybarn-wasm (default: latest)'
+        required: false
+        default: 'latest'
+  # Validate the harness itself when it changes.
+  push:
+    paths:
+      - 'scripts/test-wasm.sh'
+      - 'scripts/wasm-tester-patch.mjs'
+      - '.github/workflows/WasmDeployedTest.yml'
+  pull_request:
+    paths:
+      - 'scripts/test-wasm.sh'
+      - 'scripts/wasm-tester-patch.mjs'
+      - '.github/workflows/WasmDeployedTest.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-deployed-wasm:
+    name: ${{ matrix.platform }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [eh, mvp]
+
+    steps:
+      # No submodules: the script only needs scripts/ and test/.
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Test deployed WASM artifact
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          ENGINE_VERSION: ${{ github.event.inputs.engine_version }}
+          ENGINE_PKG: ${{ github.event.inputs.engine_pkg || 'latest' }}
+        run: ./scripts/test-wasm.sh -- --json "wasm-report-${{ matrix.platform }}.json"
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-report-${{ matrix.platform }}
+          path: wasm-report-${{ matrix.platform }}.json
+          if-no-files-found: ignore
