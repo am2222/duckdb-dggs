@@ -1091,3 +1091,34 @@ FROM (VALUES ('POLYGON ((-71.5 42.3, -70 42.3, -70 43, -71.5 43, -71.5 42.3))'::
 ----
 true
 
+
+# ============================================================
+# Catalog metadata
+#
+# Every function the extension registers must be discoverable
+# through duckdb_functions(): a description, at least one
+# example, categories, and real parameter names rather than the
+# col0/col1 placeholders the bare RegisterFunction overload
+# leaves behind.
+# ============================================================
+
+statement ok
+CREATE OR REPLACE TABLE _dggs_functions AS
+SELECT function_name, function_type, parameters, description, examples, categories
+FROM duckdb_functions()
+WHERE function_name SIMILAR TO
+      '(duck_dggs_version|dggs_.*|geo_to_.*|seqnum_.*|q2di_.*|q2dd_.*|projtri_.*|zorder_to_seqnum|z3_to_seqnum|z7_to_seqnum|vertex2dd_to_seqnum|igeo7_.*)';
+
+# Guards against the list above silently matching nothing.
+query I
+SELECT count(*) > 100 FROM _dggs_functions;
+----
+true
+
+query I
+SELECT count(*)
+FROM _dggs_functions
+WHERE description IS NULL OR len(examples) = 0 OR len(categories) = 0
+   OR len(list_filter(parameters, lambda x: x LIKE 'col%')) > 0;
+----
+0
