@@ -20,7 +20,9 @@
 # Common extra args: --platform mvp | --verbose | --json report.json
 #
 # Env overrides:
-#   ENGINE_VERSION   Force the R2 catalog version (e.g. v1.5.3). Default: auto-detect.
+#   ENGINE_VERSION   Force the R2 catalog version (e.g. v1.5.5). Default: auto-detect.
+#   ENGINE_PKG       npm version of @haybarn/haybarn-wasm (default: latest). The
+#                    tester pins an exact old rc; see "Why pull the engine" below.
 #   PLATFORM         wasm platform: eh (default) | mvp
 #   EXT_NAME         Extension to test (default: duck_dggs)
 #   WORKDIR          Scratch dir (default: build/wasm-test, gitignored under build/)
@@ -30,6 +32,18 @@
 # v1.5.4-dev makes the tester probe an empty v1.5.4 catalog and falsely report
 # "not deployed"). We instead probe R2 for the newest version where this
 # extension's artifact really exists, and pass it as --engine-version.
+#
+# Why pull the engine: the tester's package.json pins @haybarn/haybarn-wasm to an
+# exact rc. --engine-version only steers OUR R2 probe; the LOAD inside the engine
+# uses the engine's own baked-in catalog URL. Once that catalog version is retired
+# from R2 every test fails with a bogus "signature is either missing or invalid".
+# So we track npm `latest` unless ENGINE_PKG pins otherwise.
+#
+# Why patch the tester: its wasmEnabled() assumes excluded_platforms is a
+# delimited string, but descriptors may use a YAML list (e.g. mssql_ducklake),
+# which crashes the whole run with "TypeError: e.trim is not a function" before
+# any extension is tested. The patch below is idempotent and self-disabling once
+# upstream handles both forms.
 
 set -euo pipefail
 
@@ -64,6 +78,9 @@ clone_or_update() {
   local url="$1" dir="$2"
   if [[ -d "${dir}/.git" ]]; then
     echo "updating $(basename "$dir") ..."
+    # Discard our local patch first, or --ff-only refuses and the checkout
+    # silently freezes at whatever it was cloned at.
+    git -C "$dir" checkout --quiet -- . 2>/dev/null || true
     git -C "$dir" pull --ff-only --quiet || echo "  (pull skipped; using existing checkout)"
   else
     echo "cloning $(basename "$dir") ..."
@@ -71,8 +88,15 @@ clone_or_update() {
   fi
 }
 
+# Teach the tester that excluded_platforms may be a YAML list, not just a
+# delimited string. Idempotent; a no-op once upstream accepts both.
+patch_tester() {
+  node "${REPO_ROOT}/scripts/wasm-tester-patch.mjs" "$TESTER_DIR"
+}
+
 clone_or_update "$TESTER_REPO"    "$TESTER_DIR"
 clone_or_update "$COMMUNITY_REPO" "$COMMUNITY_DIR"
+patch_tester
 
 # Install tester deps once (node_modules persists in the gitignored workdir).
 if [[ ! -d "${TESTER_DIR}/node_modules" ]]; then
@@ -80,7 +104,22 @@ if [[ ! -d "${TESTER_DIR}/node_modules" ]]; then
   ( cd "$TESTER_DIR" && npm install --silent )
 fi
 
+# Keep the wasm engine current; the tester pins an exact rc that goes stale as
+# soon as its catalog version is retired from R2.
+ENGINE_PKG="${ENGINE_PKG:-latest}"
+engine_installed="$(node -p "require('${TESTER_DIR}/node_modules/@haybarn/haybarn-wasm/package.json').version" 2>/dev/null || echo '')"
+engine_wanted="$(npm view "@haybarn/haybarn-wasm@${ENGINE_PKG}" version 2>/dev/null || echo '')"
+if [[ -n "$engine_wanted" && "$engine_installed" != "$engine_wanted" ]]; then
+  echo "updating wasm engine ${engine_installed:-none} -> ${engine_wanted} ..."
+  ( cd "$TESTER_DIR" && npm install --silent "@haybarn/haybarn-wasm@${engine_wanted}" )
+elif [[ -z "$engine_wanted" ]]; then
+  echo "  (npm view failed; using installed engine ${engine_installed:-none})"
+fi
+
 plat_dir="wasm_${PLATFORM}"
+
+artifact_url() { echo "${R2_BASE}/${1}/${plat_dir}/${EXT_NAME}.duckdb_extension.wasm"; }
+artifact_status() { curl -s -o /dev/null -w '%{http_code}' -I "$(artifact_url "$1")"; }
 
 # Resolve the catalog version: explicit override, else probe R2 for the newest
 # version where this extension's artifact exists.
@@ -99,8 +138,7 @@ if [[ -z "$ENGINE_VERSION" ]]; then
     fi
   fi
   for ver in "${candidates[@]}"; do
-    url="${R2_BASE}/${ver}/${plat_dir}/${EXT_NAME}.duckdb_extension.wasm"
-    if [[ "$(curl -s -o /dev/null -w '%{http_code}' -I "$url")" == "200" ]]; then
+    if [[ "$(artifact_status "$ver")" == "200" ]]; then
       ENGINE_VERSION="$ver"; break
     fi
   done
@@ -109,6 +147,17 @@ if [[ -z "$ENGINE_VERSION" ]]; then
     echo "       The extension may not be deployed yet, or set ENGINE_VERSION=vX.Y.Z explicitly."
     exit 1
   fi
+fi
+
+# Fail loudly if the artifact is not actually there. The tester prints NODEP for
+# this and then exits 0, so a retired catalog version would otherwise show up as
+# a green CI run (exactly how the v1.5.3 retirement went unnoticed).
+status="$(artifact_status "$ENGINE_VERSION")"
+if [[ "$status" != "200" ]]; then
+  echo "error: ${EXT_NAME} is not deployed at catalog ${ENGINE_VERSION} (${plat_dir})."
+  echo "       HTTP ${status} for $(artifact_url "$ENGINE_VERSION")"
+  echo "       That catalog version may have been retired; unset ENGINE_VERSION to auto-detect."
+  exit 1
 fi
 
 # The tester clones each extension's source into <src-workdir>/<name> and skips

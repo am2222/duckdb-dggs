@@ -12,6 +12,12 @@ extension:
 repo:
   github: am2222/duckdb-dggs
   ref: bbcfb2518e6950b8d30bdae1e9c4280fb98bcfb1
+  # ref_next drives the upstream PRERELEASE leg (build_next.yml, DuckDB
+  # v2.0-cyanoptera), which runs with require_ref_next: true. Without this key
+  # the job resolves an empty ref, skips, and the PR passes green having built
+  # nothing against v2. Both refs are placeholders: release-please.yml stamps
+  # them with the release SHA on its way to community-extensions.
+  ref_next: bbcfb2518e6950b8d30bdae1e9c4280fb98bcfb1
 
 docs:
   hello_world: |

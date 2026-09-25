@@ -17,9 +17,10 @@
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/vector_operations/generic_executor.hpp"
 #include "duckdb/function/scalar_function.hpp"
+#include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 
-#include "library.h"
 #include "auth/authalic.hpp"
+#include "library.h"
 
 #include <array>
 #include <cstring>
@@ -479,10 +480,7 @@ void EncodeAtResolutionFunction(DataChunk &args, ExpressionState &,
 } // namespace
 
 void RegisterIGeo7Functions(ExtensionLoader &loader) {
-  // All of these can throw (malformed index strings, unsupported WKB, ...).
-  auto add = [&](ScalarFunction fn) {
-    loader.RegisterFunction(Fallible(std::move(fn)));
-  };
+  const vector<string> IGEO7 = {"dggs", "igeo7"};
 
   const auto UB = LogicalType::UBIGINT;
   const auto I = LogicalType::INTEGER;
@@ -491,65 +489,167 @@ void RegisterIGeo7Functions(ExtensionLoader &loader) {
   const auto BO = LogicalType::BOOLEAN;
   const auto GEO = LogicalType::GEOMETRY();
 
+  // All of these can throw (malformed index strings, unsupported WKB, ...).
+  auto add = [&](const char *name, vector<LogicalType> arg_types,
+                 const LogicalType &return_type, scalar_function_t fn,
+                 vector<string> parameter_names, const char *description,
+                 const char *example) {
+    CreateScalarFunctionInfo info(Fallible(WithParameterNames(
+        ScalarFunction(name, arg_types, return_type, std::move(fn)),
+        parameter_names)));
+    // What the bare RegisterFunction(ScalarFunction) overload does
+    // internally; CreateInfo itself defaults to ERROR_ON_CONFLICT.
+    info.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
+
+    FunctionDescription desc;
+    desc.parameter_types = std::move(arg_types);
+    desc.parameter_names = std::move(parameter_names);
+    desc.description = description;
+    desc.examples = {example};
+    desc.categories = IGEO7;
+    info.descriptions.push_back(std::move(desc));
+    loader.RegisterFunction(std::move(info));
+  };
+
   // WGS84 geodetic ↔ authalic latitude conversion (Karney 2022 Fourier series)
   // applied to every vertex Y of a GEOMETRY. Useful before/after equal-area
   // operations on lon/lat data.
-  add(ScalarFunction("igeo7_geo_to_authalic", {GEO}, GEO,
-                     GeoToAuthalicFunction));
-  add(ScalarFunction("igeo7_authalic_to_geo", {GEO}, GEO,
-                     AuthalicToGeoFunction));
+  add("igeo7_geo_to_authalic", {GEO}, GEO, GeoToAuthalicFunction, {"geom"},
+      "Remaps every vertex latitude of a geometry from geodetic (WGS84) to "
+      "authalic (equal-area sphere) latitude, passing longitude and any Z/M "
+      "components through unchanged.",
+      "igeo7_geo_to_authalic('POINT (0 45)'::GEOMETRY)");
+  add("igeo7_authalic_to_geo", {GEO}, GEO, AuthalicToGeoFunction, {"geom"},
+      "Remaps every vertex latitude of a geometry from authalic (equal-area "
+      "sphere) back to geodetic (WGS84) latitude, inverting "
+      "igeo7_geo_to_authalic.",
+      "igeo7_authalic_to_geo('POINT (0 44.87170287343394)'::GEOMETRY)");
 
-  add(ScalarFunction("igeo7_get_resolution", {UB}, I, GetResolutionFunction));
+  add("igeo7_get_resolution", {UB}, I, GetResolutionFunction, {"idx"},
+      "Returns the resolution (0-20) of a packed IGEO7/Z7 index, given by the "
+      "number of digit slots before the first padding value.",
+      "igeo7_get_resolution(igeo7_from_string('0800432'))");
 
-  add(ScalarFunction("igeo7_get_base_cell", {UB}, UT, GetBaseCellFunction));
+  add("igeo7_get_base_cell", {UB}, UT, GetBaseCellFunction, {"idx"},
+      "Returns the base cell ID (0-11) held in the top 4 bits of a packed "
+      "IGEO7/Z7 index.",
+      "igeo7_get_base_cell(igeo7_from_string('0800432'))");
 
-  add(ScalarFunction("igeo7_get_digit", {UB, I}, UT, GetDigitFunction));
+  add("igeo7_get_digit", {UB, I}, UT, GetDigitFunction, {"idx", "pos"},
+      "Returns the digit at position pos (1-20) of a packed IGEO7/Z7 index, "
+      "or 7 (padding) when pos is out of range or beyond the cell's "
+      "resolution.",
+      "igeo7_get_digit(igeo7_from_string('0800432'), 3)");
 
-  add(ScalarFunction("igeo7_parent_at", {UB, I}, UB, ParentAtFunction));
+  add("igeo7_parent_at", {UB, I}, UB, ParentAtFunction, {"idx", "res"},
+      "Returns the ancestor of a packed IGEO7/Z7 index at the given "
+      "resolution, keeping digits 1..res and filling the remaining slots with "
+      "padding.",
+      "igeo7_parent_at(igeo7_from_string('0800432'), 3)");
 
-  add(ScalarFunction("igeo7_parent", {UB}, UB, ParentFunction));
+  add("igeo7_parent", {UB}, UB, ParentFunction, {"idx"},
+      "Returns the parent of a packed IGEO7/Z7 index one resolution level up; "
+      "a resolution-0 index returns itself.",
+      "igeo7_parent(igeo7_from_string('0800432'))");
 
-  add(ScalarFunction("igeo7_to_string", {UB}, V, ToStringFunction));
+  add("igeo7_to_string", {UB}, V, ToStringFunction, {"idx"},
+      "Renders a packed IGEO7/Z7 index in compact string form: a two-digit "
+      "base cell followed by the significant digits, stopping at the first "
+      "padding slot.",
+      "igeo7_to_string(612839406969683967::UBIGINT)");
 
-  add(ScalarFunction("igeo7_from_string", {V}, UB, FromStringFunction));
+  add("igeo7_from_string", {V}, UB, FromStringFunction, {"s"},
+      "Parses a compact IGEO7/Z7 string (base cell plus significant digits) "
+      "into the canonical 64-bit packed index.",
+      "igeo7_from_string('0800432')");
 
-  add(ScalarFunction("igeo7_get_neighbours", {UB}, LogicalType::LIST(UB),
-                     GetNeighboursFunction));
+  add("igeo7_get_neighbours", {UB}, LogicalType::LIST(UB),
+      GetNeighboursFunction, {"idx"},
+      "Returns the six neighbours of a packed IGEO7/Z7 index; directions "
+      "excluded by a pentagon yield the invalid sentinel UINT64_MAX.",
+      "igeo7_get_neighbours(igeo7_from_string('0800432'))");
 
-  add(ScalarFunction("igeo7_get_neighbour", {UB, I}, UB, GetNeighbourFunction));
+  add("igeo7_get_neighbour", {UB, I}, UB, GetNeighbourFunction,
+      {"idx", "direction"},
+      "Returns the neighbour of a packed IGEO7/Z7 index in direction 1-6, or "
+      "the invalid sentinel UINT64_MAX for an out-of-range or "
+      "pentagon-excluded direction.",
+      "igeo7_get_neighbour(igeo7_from_string('0800432'), 1)");
 
-  add(ScalarFunction("igeo7_first_non_zero", {UB}, I, FirstNonZeroFunction));
+  add("igeo7_first_non_zero", {UB}, I, FirstNonZeroFunction, {"idx"},
+      "Returns the position (1-20) of the first non-zero digit slot of a "
+      "packed IGEO7/Z7 index, or 0 when every slot is zero or padding.",
+      "igeo7_first_non_zero(igeo7_from_string('0800432'))");
 
-  add(ScalarFunction("igeo7_is_valid", {UB}, BO, IsValidFunction));
+  add("igeo7_is_valid", {UB}, BO, IsValidFunction, {"idx"},
+      "Returns false only when a packed IGEO7/Z7 index equals the invalid "
+      "sentinel UINT64_MAX that neighbour lookups return for excluded "
+      "directions.",
+      "igeo7_is_valid(igeo7_from_string('0800432'))");
 
-  // igeo7_encode: two overloads so untyped SQL literals (INTEGER) and typed
-  // UTINYINT columns both bind cleanly. Values are masked to field widths
-  // internally.
-  for (auto digit_type : {UT, I}) {
-    vector<LogicalType> encode_args;
-    encode_args.reserve(21);
-    encode_args.push_back(digit_type); // base_cell
-    for (int i = 0; i < 20; i++) {
-      encode_args.push_back(digit_type); // d1..d20
+  // igeo7_encode / igeo7_encode_at_resolution: each gets two overloads so
+  // untyped SQL literals (INTEGER) and typed UTINYINT columns both bind
+  // cleanly. Values are masked to field widths internally.
+  auto add_encode = [&](const char *name, bool with_resolution,
+                        scalar_function_t fn, const char *description,
+                        const char *example) {
+    vector<string> names = {"base_cell"};
+    if (with_resolution) {
+      names.push_back("res");
     }
-    add(ScalarFunction("igeo7_encode", std::move(encode_args), UB,
-                       EncodeFunction));
-  }
-
-  // igeo7_encode_at_resolution: (base, res, d1..d20). Registered as C++
-  // rather than a SQL macro because DuckDB v1.5's DefaultMacro caps
-  // parameters at 8 and this signature has 22.
-  for (auto digit_type : {UT, I}) {
-    vector<LogicalType> args_vec;
-    args_vec.reserve(22);
-    args_vec.push_back(digit_type); // base_cell
-    args_vec.push_back(I);          // resolution
-    for (int i = 0; i < 20; i++) {
-      args_vec.push_back(digit_type); // d1..d20
+    for (int i = 1; i <= 20; i++) {
+      names.push_back("d" + std::to_string(i));
     }
-    add(ScalarFunction("igeo7_encode_at_resolution", std::move(args_vec), UB,
-                       EncodeAtResolutionFunction));
-  }
+
+    ScalarFunctionSet set(name);
+    vector<vector<LogicalType>> signatures;
+    for (auto digit_type : {UT, I}) {
+      vector<LogicalType> arg_types;
+      arg_types.reserve(names.size());
+      arg_types.push_back(digit_type); // base_cell
+      if (with_resolution) {
+        arg_types.push_back(I); // resolution
+      }
+      for (int i = 0; i < 20; i++) {
+        arg_types.push_back(digit_type); // d1..d20
+      }
+      set.AddFunction(Fallible(
+          WithParameterNames(ScalarFunction(name, arg_types, UB, fn), names)));
+      signatures.push_back(std::move(arg_types));
+    }
+
+    CreateScalarFunctionInfo info(std::move(set));
+    info.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
+    for (auto &signature : signatures) {
+      FunctionDescription desc;
+      desc.parameter_types = std::move(signature);
+      desc.parameter_names = names;
+      desc.description = description;
+      desc.examples = {example};
+      desc.categories = IGEO7;
+      info.descriptions.push_back(std::move(desc));
+    }
+    loader.RegisterFunction(std::move(info));
+  };
+
+  add_encode("igeo7_encode", false, EncodeFunction,
+             "Packs a base cell (0-11) and exactly 20 three-bit digits into "
+             "the canonical 64-bit IGEO7/Z7 index, using 7 for every slot "
+             "beyond the target resolution; the INTEGER overload accepts "
+             "unadorned SQL literals.",
+             "igeo7_encode(8, 0, 0, 4, 3, 2, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, "
+             "7, 7, 7, 7)");
+
+  // igeo7_encode_at_resolution is a C++ scalar rather than a SQL macro
+  // because DuckDB v1.5's DefaultMacro caps parameters at 8 and this
+  // signature has 22.
+  add_encode("igeo7_encode_at_resolution", true, EncodeAtResolutionFunction,
+             "Packs a base cell and 20 three-bit digits and truncates the "
+             "result to the given resolution, filling slots res+1..20 with "
+             "padding; equivalent to "
+             "igeo7_parent_at(igeo7_encode(...), res) in one call.",
+             "igeo7_encode_at_resolution(8, 3, 0, 0, 4, 3, 2, 7, 7, 7, 7, 7, "
+             "7, 7, 7, 7, 7, 7, 7, 7, 7, 7)");
 
   // ── SQL companion macros ────────────────────────────────────────────────
   // These mirror the five macros shipped by the upstream igeo7_duckdb
@@ -557,28 +657,53 @@ void RegisterIGeo7Functions(ExtensionLoader &loader) {
   // convenience surface is available without a separate .read step.
   // `igeo7_encode_at_resolution` is implemented above as a C++ scalar
   // (22 parameters; v1.5's DefaultMacro caps at 8).
-  static const SqlMacro IGEO7_MACROS[] = {
+  struct DocumentedMacro {
+    SqlMacro macro;
+    const char *description;
+    const char *example;
+  };
+  static const DocumentedMacro IGEO7_MACROS[] = {
       // Verbose "B-d1.d2...d20" form (all 20 slots incl. padding 7s).
-      {"igeo7_decode_str", "raw",
-       "CONCAT("
-       "  (raw >> 60::UBIGINT) & 15::UBIGINT, '-',"
-       "  (raw >> 57::UBIGINT) & 7, '.', (raw >> 54::UBIGINT) & 7, '.',"
-       "  (raw >> 51::UBIGINT) & 7, '.', (raw >> 48::UBIGINT) & 7, '.',"
-       "  (raw >> 45::UBIGINT) & 7, '.', (raw >> 42::UBIGINT) & 7, '.',"
-       "  (raw >> 39::UBIGINT) & 7, '.', (raw >> 36::UBIGINT) & 7, '.',"
-       "  (raw >> 33::UBIGINT) & 7, '.', (raw >> 30::UBIGINT) & 7, '.',"
-       "  (raw >> 27::UBIGINT) & 7, '.', (raw >> 24::UBIGINT) & 7, '.',"
-       "  (raw >> 21::UBIGINT) & 7, '.', (raw >> 18::UBIGINT) & 7, '.',"
-       "  (raw >> 15::UBIGINT) & 7, '.', (raw >> 12::UBIGINT) & 7, '.',"
-       "  (raw >>  9::UBIGINT) & 7, '.', (raw >>  6::UBIGINT) & 7, '.',"
-       "  (raw >>  3::UBIGINT) & 7, '.', (raw >>  0::UBIGINT) & 7)"},
-      {"igeo7_string_parent", "s", "s[1:LENGTH(s) - 1]"},
-      {"igeo7_string_local_pos", "s", "s[LENGTH(s):LENGTH(s)]"},
-      {"igeo7_string_is_center", "s", "s[LENGTH(s):LENGTH(s)] = '0'"},
+      {{"igeo7_decode_str", "raw",
+        "CONCAT("
+        "  (raw >> 60::UBIGINT) & 15::UBIGINT, '-',"
+        "  (raw >> 57::UBIGINT) & 7, '.', (raw >> 54::UBIGINT) & 7, '.',"
+        "  (raw >> 51::UBIGINT) & 7, '.', (raw >> 48::UBIGINT) & 7, '.',"
+        "  (raw >> 45::UBIGINT) & 7, '.', (raw >> 42::UBIGINT) & 7, '.',"
+        "  (raw >> 39::UBIGINT) & 7, '.', (raw >> 36::UBIGINT) & 7, '.',"
+        "  (raw >> 33::UBIGINT) & 7, '.', (raw >> 30::UBIGINT) & 7, '.',"
+        "  (raw >> 27::UBIGINT) & 7, '.', (raw >> 24::UBIGINT) & 7, '.',"
+        "  (raw >> 21::UBIGINT) & 7, '.', (raw >> 18::UBIGINT) & 7, '.',"
+        "  (raw >> 15::UBIGINT) & 7, '.', (raw >> 12::UBIGINT) & 7, '.',"
+        "  (raw >>  9::UBIGINT) & 7, '.', (raw >>  6::UBIGINT) & 7, '.',"
+        "  (raw >>  3::UBIGINT) & 7, '.', (raw >>  0::UBIGINT) & 7)"},
+       "Renders a packed IGEO7/Z7 index in the verbose base-d1.d2...d20 form, "
+       "showing all 20 digit slots including the padding 7s.",
+       "igeo7_decode_str(32023330408103935::UBIGINT)"},
+      {{"igeo7_string_parent", "s", "s[1:LENGTH(s) - 1]"},
+       "Returns the parent of a compact IGEO7 string by dropping its last "
+       "character.",
+       "igeo7_string_parent('0800432')"},
+      {{"igeo7_string_local_pos", "s", "s[LENGTH(s):LENGTH(s)]"},
+       "Returns the last character of a compact IGEO7 string: the cell's "
+       "local position digit within its parent.",
+       "igeo7_string_local_pos('0800432')"},
+      {{"igeo7_string_is_center", "s", "s[LENGTH(s):LENGTH(s)] = '0'"},
+       "Returns true when a compact IGEO7 string ends in '0', meaning the "
+       "cell covers the centre position within its parent.",
+       "igeo7_string_is_center('080040')"},
   };
 
-  for (const auto &macro : IGEO7_MACROS) {
-    auto info = MakeMacroInfo(macro);
+  for (const auto &entry : IGEO7_MACROS) {
+    auto info = MakeMacroInfo(entry.macro);
+    // No parameter_types: with a single description DuckDB uses it for the
+    // macro regardless of arity, and the macro carries its own real
+    // parameter names.
+    FunctionDescription desc;
+    desc.description = entry.description;
+    desc.examples = {entry.example};
+    desc.categories = IGEO7;
+    info->descriptions.push_back(std::move(desc));
     loader.RegisterFunction(*info);
   }
 }
