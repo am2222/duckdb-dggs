@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.10](https://github.com/am2222/duckdb-dggs/compare/v0.1.9...v0.1.10) (2026-09-25)
+
+
+### Features
+
+* **compat:** add WithParameterNames function for parameter naming ([6026e6a](https://github.com/am2222/duckdb-dggs/commit/6026e6a54fc49f638dd3920cc2520780ffb30dd4))
+* **igeo7:** enhance function registration with detailed metadata ([f6c693a](https://github.com/am2222/duckdb-dggs/commit/f6c693a8d7664bb0272593b92d7c6aa539ad01a0))
+* **tests:** add WASM deployed test workflow and patch for tester ([10002c7](https://github.com/am2222/duckdb-dggs/commit/10002c7e12bb67d2ad05bfc234b75536de276ff5))
+
+
+### Bug Fixes
+
+* **release:** update description.yml to include ref_next for upstream build ([7622545](https://github.com/am2222/duckdb-dggs/commit/762254577bd39c01e72bac342a9677d66defa739))
+
 ## [0.1.9](https://github.com/am2222/duckdb-dggs/compare/v0.1.8...v0.1.9) (2026-09-07)
 
 
