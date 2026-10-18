@@ -44,6 +44,40 @@ add_subdirectory("${DGGRID_DIR}" "third_party/DGGRID" EXCLUDE_FROM_ALL)
 
 set(DGLIB_INCLUDE_DIR "${DGGRID_DIR}/src/lib/dglib/include")
 
+# DGGRID v9's DgDiscRFS.h and DgDiscTopoRFS.h pass DgDiscRF / DgDiscTopoRF as a
+# template template argument from inside a class derived from it. There the bare
+# name is the injected base-class name, which MSVC (correctly) refuses as a
+# template (error C3200); clang and gcc accept it. Write fixed copies that say
+# ::DgDiscRF / ::DgDiscTopoRF into the build tree and search them before dglib's
+# own headers, leaving the submodule untouched. Nothing is patched once upstream
+# fixes the headers.
+set(DGLIB_PATCH_DIR "${CMAKE_CURRENT_BINARY_DIR}/dglib_patched")
+foreach(_tmpl DgDiscRF DgDiscTopoRF)
+  set(_hdr "${DGLIB_INCLUDE_DIR}/dglib/${_tmpl}S.h")
+  file(READ "${_hdr}" _orig)
+  string(REPLACE "DgDiscRFSGrids<${_tmpl}," "DgDiscRFSGrids< ::${_tmpl},"
+                 _fixed "${_orig}")
+  if(NOT _fixed STREQUAL _orig)
+    # The copy no longer sits next to ../lib/, so point that include at the
+    # submodule.
+    string(REPLACE "#include \"../lib/"
+                   "#include \"${DGGRID_DIR}/src/lib/dglib/lib/" _fixed
+                   "${_fixed}")
+    set(_out "${DGLIB_PATCH_DIR}/dglib/${_tmpl}S.h")
+    set(_prev "")
+    if(EXISTS "${_out}")
+      file(READ "${_out}" _prev)
+    endif()
+    if(NOT _prev STREQUAL _fixed) # avoid rebuilding on every configure
+      file(WRITE "${_out}" "${_fixed}")
+    endif()
+    set(DGLIB_PATCHED ON)
+  endif()
+endforeach()
+if(DGLIB_PATCHED)
+  target_include_directories(dglib BEFORE PUBLIC "${DGLIB_PATCH_DIR}")
+endif()
+
 # --------------------------------------------------------------------------
 # Z7 core library + authalic latitude conversion (submodule at
 # third_party/igeo7_duckdb, upstream:
@@ -83,11 +117,13 @@ set(DUCKDB_EXTENSION_DUCK_DGGS_LINKED_LIBS $<TARGET_FILE:dglib>)
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
 build_loadable_extension(${TARGET_NAME} "" ${EXTENSION_SOURCES})
 
-target_include_directories(${EXTENSION_NAME} PRIVATE "${DGLIB_INCLUDE_DIR}"
-                                                     "${Z7_DIR}" "${IGEO7_DIR}")
 target_include_directories(
-  ${LOADABLE_EXTENSION_NAME} PRIVATE "${DGLIB_INCLUDE_DIR}" "${Z7_DIR}"
-                                     "${IGEO7_DIR}")
+  ${EXTENSION_NAME} PRIVATE "${DGLIB_PATCH_DIR}" "${DGLIB_INCLUDE_DIR}"
+                            "${Z7_DIR}" "${IGEO7_DIR}")
+target_include_directories(
+  ${LOADABLE_EXTENSION_NAME}
+  PRIVATE "${DGLIB_PATCH_DIR}" "${DGLIB_INCLUDE_DIR}" "${Z7_DIR}"
+          "${IGEO7_DIR}")
 
 add_dependencies(${EXTENSION_NAME} dglib)
 add_dependencies(${LOADABLE_EXTENSION_NAME} dglib)
