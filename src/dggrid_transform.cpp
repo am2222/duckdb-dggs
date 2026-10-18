@@ -54,17 +54,17 @@
 #include <dglib/DgApSeq.h>       // DgApSeq (aperture sequence support)
 #include <dglib/DgProjTriRF.h>   // DgProjTriRF, DgProjTriCoord, DgPlaneTriRF
 #include <dglib/DgIDGGutil.h> // DgQ2DDCoord, DgQ2DDRF, DgPlaneTriRF, DgVertex2DDRF
-#include <dglib/DgGridTopo.h>       // Hexagon, Triangle, Diamond, D4, D6
-#include <dglib/DgLocation.h>       // DgLocation
-#include <dglib/DgPolygon.h>        // DgPolygon / DgLocVector (cell boundary)
-#include <dglib/DgCell.h>           // DgCell
-#include <dglib/DgIVec2D.h>         // DgIVec2D (.i(), .j())
-#include <dglib/DgDVec2D.h>         // DgDVec2D (.x(), .y())
-#include <dglib/DgConstants.h>      // M_PIl, M_ZERO
-#include <dglib/DgHierNdx.h>               // DgHierNdx (int + string index)
-#include <dglib/DgHierNdxIntRF.h>          // DgHierNdxIntCoord (.value())
-#include <dglib/DgHierNdxSystemRFBase.h>   // per-resolution Z* index RF
-#include <dglib/DgHierNdxSystemRFSBase.h>  // Z* system factory (makeSystem)
+#include <dglib/DgGridTopo.h>     // Hexagon, Triangle, Diamond, D4, D6
+#include <dglib/DgLocation.h>     // DgLocation
+#include <dglib/DgPolygon.h>      // DgPolygon / DgLocVector (cell boundary)
+#include <dglib/DgCell.h>         // DgCell
+#include <dglib/DgIVec2D.h>       // DgIVec2D (.i(), .j())
+#include <dglib/DgDVec2D.h>       // DgDVec2D (.x(), .y())
+#include <dglib/DgConstants.h>    // M_PIl, M_ZERO
+#include <dglib/DgHierNdx.h>      // DgHierNdx (int + string index)
+#include <dglib/DgHierNdxIntRF.h> // DgHierNdxIntCoord (.value())
+#include <dglib/DgHierNdxSystemRFBase.h>  // per-resolution Z* index RF
+#include <dglib/DgHierNdxSystemRFSBase.h> // Z* system factory (makeSystem)
 
 #include <algorithm>
 #include <cmath>
