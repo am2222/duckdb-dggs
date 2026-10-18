@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.1.11](https://github.com/am2222/duckdb-dggs/compare/v0.1.10...v0.1.11) (2026-10-18)
+
+
+### Features
+
+* add DGLIB patching for DGGRID v9 compatibility in CMake ([14a1358](https://github.com/am2222/duckdb-dggs/commit/14a13580c002f4d08490be422d291a7055758911))
+* **cmake:** add force-include for DgHierNdx.h in dglib sources ([af7f87e](https://github.com/am2222/duckdb-dggs/commit/af7f87ec984b20a6ba032fe5c9eb1bed5e886c60))
+* **coverage:** add polygon_to_seqnums, every cell whose centre lies inside a POLYGON or MULTIPOLYGON ([dad9882](https://github.com/am2222/duckdb-dggs/commit/dad9882958330bbf10a04ae4ae31066eee309de0))
+* **geodesy:** add geo_distance_km and geo_azimuth_deg, great-circle distance and initial bearing between points ([dad9882](https://github.com/am2222/duckdb-dggs/commit/dad9882958330bbf10a04ae4ae31066eee309de0))
+* **hierarchy:** add seqnum_index_parent and seqnum_index_children, the parent and children in the grid's Z3 / ZOrder / Z7 indexing hierarchy (DGGRID v9 indexing parent/children) ([dad9882](https://github.com/am2222/duckdb-dggs/commit/dad9882958330bbf10a04ae4ae31066eee309de0))
+* **neighbors:** add seqnum_k_ring, the cell plus every cell within k neighbor steps ([dad9882](https://github.com/am2222/duckdb-dggs/commit/dad9882958330bbf10a04ae4ae31066eee309de0))
+* **stats:** add seqnum_cell_area_km, the true spherical area of a single cell ([dad9882](https://github.com/am2222/duckdb-dggs/commit/dad9882958330bbf10a04ae4ae31066eee309de0))
+* upgrade to DGGRID v9.03b, build against DuckDB v2.0, add coverage and index-hierarchy functions ([dad9882](https://github.com/am2222/duckdb-dggs/commit/dad9882958330bbf10a04ae4ae31066eee309de0))
+
+
+### Bug Fixes
+
+* raise an error for out-of-range sequence numbers instead of crashing the DuckDB process ([dad9882](https://github.com/am2222/duckdb-dggs/commit/dad9882958330bbf10a04ae4ae31066eee309de0))
+* **release:** stamp repo.variegata instead of ref_next in the community-extensions description.yml ([dad9882](https://github.com/am2222/duckdb-dggs/commit/dad9882958330bbf10a04ae4ae31066eee309de0))
+
 ## [0.1.10](https://github.com/am2222/duckdb-dggs/compare/v0.1.9...v0.1.10) (2026-09-25)
 
 
