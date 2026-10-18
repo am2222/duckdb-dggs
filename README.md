@@ -5,9 +5,13 @@
   Transforms geographic coordinates to and from DGGS cell identifiers across multiple coordinate reference frames.</p>
   <p><strong><a href="https://am2222.github.io/duckdb-dggs/">Documentation</a></strong></p>
   <p>
-    <a href="https://github.com/am2222/duckdb-dggs/actions/workflows/CI.yml"><img src="https://github.com/am2222/duckdb-dggs/actions/workflows/CI.yml/badge.svg?branch=main" alt="CI"/></a>
-    <a href="test/sql/duck_dggs.test"><img src="https://img.shields.io/badge/tests-134%20passing-brightgreen" alt="tests: 134 passing"/></a>
-    <a href="LICENSE"><img src="https://img.shields.io/github/license/am2222/duckdb-dggs" alt="License"/></a>
+    <a href="https://github.com/am2222/duckdb-dggs/actions/workflows/MainDistributionPipeline.yml"><img src="https://img.shields.io/github/actions/workflow/status/am2222/duckdb-dggs/MainDistributionPipeline.yml?branch=main&style=flat&label=CI" alt="CI"/></a>
+    <a href="https://am2222.github.io/duckdb-dggs/"><img src="https://img.shields.io/github/actions/workflow/status/am2222/duckdb-dggs/docs.yml?branch=main&style=flat&label=docs" alt="Docs"/></a>
+    <a href="test/sql"><img src="https://img.shields.io/badge/SQL%20tests-176-brightgreen?style=flat" alt="SQL tests: 176"/></a>
+    <a href="https://github.com/am2222/duckdb-dggs/releases"><img src="https://img.shields.io/github/v/release/am2222/duckdb-dggs?style=flat&label=release" alt="Release"/></a>
+    <a href="https://github.com/duckdb/duckdb"><img src="https://img.shields.io/badge/DuckDB-v2.0-FFF000?style=flat" alt="DuckDB v2.0"/></a>
+    <a href="https://github.com/sahrk/DGGRID"><img src="https://img.shields.io/badge/DGGRID-v9.03b-blue?style=flat" alt="DGGRID v9.03b"/></a>
+    <a href="LICENSE"><img src="https://img.shields.io/github/license/am2222/duckdb-dggs?style=flat" alt="License"/></a>
   </p>
 </div>
 
