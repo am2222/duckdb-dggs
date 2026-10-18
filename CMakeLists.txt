@@ -78,6 +78,24 @@ if(DGLIB_PATCHED)
   target_include_directories(dglib BEFORE PUBLIC "${DGLIB_PATCH_DIR}")
 endif()
 
+# DgHierNdxSystemRFBase derives from DgDiscRF<DgHierNdx, ...> with DgHierNdx
+# only forward-declared. MSVC instantiates the base's member functions at the
+# end of each translation unit and fails (C2079) in the dglib sources that never
+# include DgHierNdx.h; including it directly would close an include cycle, so
+# force-include it at the top of exactly those files instead.
+set(_dglib_src "${DGGRID_DIR}/src/lib/dglib")
+set(_hierndx_tus DgHierNdxIntRF DgHierNdxStringRF DgZ3StringRF DgZ7StringRF
+                 DgZOrderStringRF)
+list(TRANSFORM _hierndx_tus PREPEND "${_dglib_src}/lib/")
+list(TRANSFORM _hierndx_tus APPEND ".cpp")
+if(MSVC)
+  set(_force_hierndx "/FIdglib/DgHierNdx.h")
+else()
+  set(_force_hierndx -include dglib/DgHierNdx.h)
+endif()
+set_source_files_properties(${_hierndx_tus} DIRECTORY "${_dglib_src}"
+                            PROPERTIES COMPILE_OPTIONS "${_force_hierndx}")
+
 # --------------------------------------------------------------------------
 # Z7 core library + authalic latitude conversion (submodule at
 # third_party/igeo7_duckdb, upstream:
