@@ -138,3 +138,33 @@ SELECT dggs_res_info(5);
 │ {res: 5, cells: 10242, area_km: 49811.1, spacing_km: 220.4, cls_km: 251.8}        │
 └────────────────────────────────────────────────────────────────────────────────────┘
 ```
+
+## seqnum_cell_area_km
+
+### Signatures
+
+```sql
+DOUBLE seqnum_cell_area_km (seqnum UBIGINT, res INTEGER)
+DOUBLE seqnum_cell_area_km (seqnum UBIGINT, res INTEGER, params STRUCT)
+```
+
+### Description
+
+Returns the true spherical area in km² of **one** cell, measured on the WGS84 authalic sphere. `dggs_cell_area_km` gives the grid average; individual cells differ from it, most visibly the 12 pentagons, and on non-equal-area projections such as `FULLER`. The areas of all cells at a resolution add up to the area of the sphere.
+
+### Example
+
+```sql
+-- a hexagon, a pentagon, and the grid average at resolution 5
+SELECT seqnum_cell_area_km(2380::UBIGINT, 5) AS hexagon,
+       seqnum_cell_area_km(1::UBIGINT, 5)    AS pentagon,
+       dggs_cell_area_km(5)                  AS average;
+```
+```
+┌───────────────────┬────────────────────┬───────────────────┐
+│      hexagon      │      pentagon      │      average      │
+│      double       │       double       │      double       │
+├───────────────────┼────────────────────┼───────────────────┤
+│ 49815.21462915404 │ 42984.471856754506 │ 49811.09587149303 │
+└───────────────────┴────────────────────┴───────────────────┘
+```

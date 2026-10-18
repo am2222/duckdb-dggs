@@ -107,3 +107,69 @@ SELECT list_contains(
 );
 -- → true
 ```
+
+## seqnum_index_parent
+
+### Signatures
+
+```sql
+UBIGINT seqnum_index_parent (seqnum UBIGINT, res INTEGER)
+UBIGINT seqnum_index_parent (seqnum UBIGINT, res INTEGER, params STRUCT)
+```
+
+### Description
+
+Returns the cell's parent at resolution `res - 1` in the grid's **hierarchical indexing system**: Z3 for aperture 3, ZOrder for aperture 4 and Z7 for aperture 7 (DGGRID v9's "indexing parent"). The resolution must be > 0.
+
+The spatial `seqnum_parent` picks the coarser cell under the cell's centre, and a cell on a boundary can touch several (`seqnum_all_parents`). The index hierarchy is instead a strict tree: every cell has exactly one index parent, which is the parent its Z3/ZOrder/Z7 index is built from.
+
+::: info
+Only for single-aperture `HEXAGON` grids (not aperture sequences).
+:::
+
+### Example
+
+```sql
+SELECT seqnum_index_parent(2381::UBIGINT, 5);
+```
+```
+┌───────────────────────────────────────────────┐
+│ seqnum_index_parent(CAST(2381 AS UBIGINT), 5) │
+│                    uint64                     │
+├───────────────────────────────────────────────┤
+│                                           599 │
+└───────────────────────────────────────────────┘
+```
+
+## seqnum_index_children
+
+### Signatures
+
+```sql
+UBIGINT[] seqnum_index_children (seqnum UBIGINT, res INTEGER)
+UBIGINT[] seqnum_index_children (seqnum UBIGINT, res INTEGER, params STRUCT)
+```
+
+### Description
+
+Returns the cell's children at resolution `res + 1` in the grid's hierarchical indexing system (the cells whose `seqnum_index_parent` is this cell): 4 for aperture 4, 3 for aperture 3 and 7 for aperture 7. Unlike `seqnum_children`, the index children of different cells never overlap, so taking them for every cell at one resolution lists each cell of the next resolution exactly once.
+
+::: info
+Only for single-aperture `HEXAGON` grids (not aperture sequences).
+:::
+
+### Example
+
+```sql
+-- the 4 index children vs the 7 spatial children on the default ISEA4H grid
+SELECT seqnum_index_children(599::UBIGINT, 4) AS index_children,
+       seqnum_children(599::UBIGINT, 4)       AS spatial_children;
+```
+```
+┌──────────────────────────┬────────────────────────────────────────────┐
+│      index_children      │              spatial_children              │
+│         uint64[]         │                  uint64[]                  │
+├──────────────────────────┼────────────────────────────────────────────┤
+│ [2380, 2381, 2412, 2413] │ [2380, 2412, 2413, 2381, 2348, 2347, 2379] │
+└──────────────────────────┴────────────────────────────────────────────┘
+```

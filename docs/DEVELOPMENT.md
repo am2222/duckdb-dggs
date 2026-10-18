@@ -62,8 +62,10 @@ Notes:
 
 ## DuckDB v2 compatibility
 
-The sources build against both the DuckDB v1.5 line and the upcoming v2
-(`v2.0-cyanoptera`). The differences are confined to
+DuckDB v2.0 is the release target: the `duckdb` submodule and the release build
+pin the same v2 commit that duckdb/community-extensions builds against
+(`v2.0.0-alpha46057`, see duckdb/community-extensions#3081). The sources still
+build against the v1.5 line too. The differences are confined to
 `src/include/duck_dggs_compat.hpp`, which detects the version at compile time
 (`__has_include("duckdb/common/vector/list_vector.hpp")`) and provides shims
 for the calls that changed: writable vector accessors (`MutableData`,
@@ -73,11 +75,12 @@ references (`ReferenceValue`), fallible-function marking (`Fallible`) and the
 SQL macro table (`SqlMacro` / `MakeMacroInfo`). New code should go through
 those shims rather than calling `FlatVector::GetData` etc. directly for writes.
 
-CI builds a **v2 canary** (`duckdb-next-build` in
-`MainDistributionPipeline.yml`) alongside the stable build. Its artifacts carry
-a `-duckdb-next` suffix and are never attached to a GitHub release. The
-community-extensions repo builds every extension against the same v2 branch,
-so a red canary here is a failure that would show up there.
+CI's release build (`duckdb-stable-build` in `MainDistributionPipeline.yml`)
+uses the same DuckDB commit, tag and extension-ci-tools branch as
+community-extensions' `build.yml`, so a red build here is a failure that would
+show up there; bump all three together when community-extensions moves. A
+second job (`duckdb-v15-build`) keeps the v1.5.6 line building. Its artifacts
+carry a `-duckdb-v1.5` suffix and are never attached to a GitHub release.
 
 Note that DuckDB v2 rejects the single-arrow lambda syntax (`x -> expr`) by
 default; tests use `lambda x: expr`, which both versions accept.
@@ -94,7 +97,8 @@ from conventional commits on `main` (`.github/workflows/release-please.yml`):
    platforms and attaches the binaries to the release.
 3. The same release-please run then opens a PR against
    `duckdb/community-extensions` (via the `am2222/community-extensions` fork)
-   that copies this repo's `description.yml` with `repo.ref` set to the release
+   that copies this repo's `description.yml` with `repo.ref` (built against
+   DuckDB v2.0) and `repo.variegata` (built against v1.5.6) set to the release
    commit. `description.yml` here is the source of truth for the listing.
 
 Steps 2 and 3 need the `RELEASE_PAT` repository secret: a classic
