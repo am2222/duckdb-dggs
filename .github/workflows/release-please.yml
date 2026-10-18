@@ -85,13 +85,12 @@ jobs:
         working-directory: community-extensions
         run: |
           target="extensions/$EXT_NAME/description.yml"
-          # Stamp both ref and ref_next. ref_next is what makes the upstream
-          # prerelease leg (build_next.yml, DuckDB v2) actually build instead of
-          # silently skipping, so it must track the release SHA too.
-          sed -E "s|^([[:space:]]*ref(_next)?:).*|\1 $SHA|" "../source/description.yml" > "$target"
+          # Stamp ref (built against DuckDB v2.0) and variegata (built against
+          # v1.5.6) with the release SHA; see duckdb/community-extensions#3081.
+          sed -E "s#^([[:space:]]*(ref|variegata):).*#\1 $SHA#" "../source/description.yml" > "$target"
           grep -q "ref: $SHA" "$target"
-          grep -q "ref_next: $SHA" "$target" || {
-            echo "::error::description.yml has no ref_next; the upstream v2 prerelease build would skip"
+          grep -q "variegata: $SHA" "$target" || {
+            echo "::error::description.yml has no variegata; the upstream v1.5.6 build would use a stale ref"
             exit 1
           }
           grep -q "version: $VERSION" "$target" || {

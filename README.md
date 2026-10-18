@@ -1,7 +1,7 @@
 <div align="center">
   <img src="duck_dggs_icon.svg" width="240" alt="duck_dggs"/>
   <h1>duck_dggs</h1>
-  <p>A DuckDB extension for discrete global grid systems (DGGS) powered by <a href="https://github.com/sahrk/DGGRID">DGGRID v8</a>.<br/>
+  <p>A DuckDB extension for discrete global grid systems (DGGS) powered by <a href="https://github.com/sahrk/DGGRID">DGGRID v9</a>.<br/>
   Transforms geographic coordinates to and from DGGS cell identifiers across multiple coordinate reference frames.</p>
   <p><strong><a href="https://am2222.github.io/duckdb-dggs/">Documentation</a></strong></p>
   <p>
@@ -41,6 +41,24 @@ SELECT seqnum_to_boundary(2380, 5);
 SELECT geo_to_seqnum('POINT(0.0 0.0)'::GEOMETRY, 5,
     dggs_params('ISEA', 3, 'HEXAGON', 0.0, 58.28252559, 11.25));
 -- → 572
+
+-- Cover a polygon with cells (cells whose centre lies inside)
+SELECT polygon_to_seqnums('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))'::GEOMETRY, 4);
+-- → [600, 601, 617, 618, 634]
+
+-- A cell and everything within 1 step of it
+SELECT seqnum_k_ring(2380::UBIGINT, 1, 5);
+-- → [2380, 2347, 2348, 2379, 2381, 2412, 2413]
+
+-- Strict-tree parent / children in the grid's Z-order index hierarchy
+SELECT seqnum_index_children(599::UBIGINT, 4);
+-- → [2380, 2381, 2412, 2413]
+
+-- True area of one cell, and great-circle distance between points
+SELECT seqnum_cell_area_km(2380::UBIGINT, 5);
+-- → 49815.21462915404
+SELECT geo_distance_km('POINT(-75.7 45.4)'::GEOMETRY, 'POINT(-0.1 51.5)'::GEOMETRY);
+-- → 5364.664130066861
 ```
 
 ---
@@ -126,6 +144,13 @@ Every function has a second overload that accepts an explicit [`dggs_params`](#d
 | [`seqnum_parent`](#seqnum_parent) | SEQNUM, res | `UBIGINT` | Parent cell at res-1. |
 | [`seqnum_all_parents`](#seqnum_all_parents) | SEQNUM, res | `UBIGINT[]` | All touching parent cells at res-1. |
 | [`seqnum_children`](#seqnum_children) | SEQNUM, res | `UBIGINT[]` | Child cells at res+1. |
+| [`seqnum_index_parent`](#seqnum_index_parent) | SEQNUM, res | `UBIGINT` | Parent in the Z3/ZOrder/Z7 index hierarchy (strict tree). |
+| [`seqnum_index_children`](#seqnum_index_children) | SEQNUM, res | `UBIGINT[]` | Children in the Z3/ZOrder/Z7 index hierarchy (non-overlapping). |
+| [`seqnum_k_ring`](#seqnum_k_ring) | SEQNUM, k, res | `UBIGINT[]` | The cell plus every cell within k neighbor steps. |
+| [`seqnum_cell_area_km`](#seqnum_cell_area_km) | SEQNUM, res | `DOUBLE` | True spherical area of one cell in km². |
+| [`polygon_to_seqnums`](#polygon_to_seqnums) | GEOMETRY, res | `UBIGINT[]` | Cells whose centre lies inside a (multi)polygon. |
+| [`geo_distance_km`](#geo_distance_km) | GEO, GEO | `DOUBLE` | Great-circle distance in km. |
+| [`geo_azimuth_deg`](#geo_azimuth_deg) | GEO, GEO | `DOUBLE` | Initial great-circle bearing in degrees. |
 | [`seqnum_to_zorder`](#seqnum_to_zorder) | SEQNUM, res | `UBIGINT` | Sequential index to Z-order index. |
 | [`zorder_to_seqnum`](#zorder_to_seqnum) | ZORDER, res | `UBIGINT` | Z-order index to sequential index. |
 | [`seqnum_to_z3`](#seqnum_to_z3) | SEQNUM, res | `UBIGINT` | Sequential index to Z3 index (aperture 3). |
@@ -181,7 +206,7 @@ SELECT duck_dggs_version();
 │  duck_dggs_version()  │
 │        varchar        │
 ├───────────────────────┤
-│ f7dbd3d (DGGRID 8.44) │
+│ f7dbd3d (DGGRID 9.0b) │
 └───────────────────────┘
 ```
 
@@ -1385,6 +1410,38 @@ SELECT dggs_res_info(5);
 
 ----
 
+### seqnum_cell_area_km
+
+#### Signatures
+
+```sql
+DOUBLE seqnum_cell_area_km (seqnum UBIGINT, res INTEGER)
+DOUBLE seqnum_cell_area_km (seqnum UBIGINT, res INTEGER, params STRUCT)
+```
+
+#### Description
+
+Returns the true spherical area in km² of **one** cell, measured on the WGS84 authalic sphere. `dggs_cell_area_km` gives the grid average; individual cells differ from it, most visibly the 12 pentagons, and on non-equal-area projections such as `FULLER`. The areas of all cells at a resolution add up to the area of the sphere.
+
+#### Example
+
+```sql
+-- a hexagon, a pentagon, and the grid average at resolution 5
+SELECT seqnum_cell_area_km(2380::UBIGINT, 5) AS hexagon,
+       seqnum_cell_area_km(1::UBIGINT, 5)    AS pentagon,
+       dggs_cell_area_km(5)                  AS average;
+```
+```
+┌───────────────────┬────────────────────┬───────────────────┐
+│      hexagon      │      pentagon      │      average      │
+│      double       │       double       │      double       │
+├───────────────────┼────────────────────┼───────────────────┤
+│ 49815.21462915404 │ 42984.471856754506 │ 49811.09587149303 │
+└───────────────────┴────────────────────┴───────────────────┘
+```
+
+----
+
 ## Neighbors
 
 ### seqnum_neighbors
@@ -1412,6 +1469,37 @@ SELECT seqnum_neighbors(2380::UBIGINT, 5);
 ├──────────────────────────────────────────────────┤
 │ [2412, 2413, 2381, 2348, 2347, 2379]             │
 └──────────────────────────────────────────────────┘
+```
+
+### seqnum_k_ring
+
+#### Signatures
+
+```sql
+UBIGINT[] seqnum_k_ring (seqnum UBIGINT, k INTEGER, res INTEGER)
+UBIGINT[] seqnum_k_ring (seqnum UBIGINT, k INTEGER, res INTEGER, params STRUCT)
+```
+
+#### Description
+
+Returns the cell and every cell within `k` neighbor steps of it. The input cell comes first, followed by ring 1, ring 2, … each sorted ascending. For a hexagon away from the pentagons the result has `1 + 3k(k+1)` cells; `k = 0` returns just the cell, and a `k` larger than the grid stops once every cell is included.
+
+::: info
+Not supported for `TRIANGLE` topology grids.
+:::
+
+#### Example
+
+```sql
+SELECT seqnum_k_ring(2380::UBIGINT, 1, 5);
+```
+```
+┌────────────────────────────────────────────┐
+│ seqnum_k_ring(CAST(2380 AS UBIGINT), 1, 5) │
+│                  uint64[]                  │
+├────────────────────────────────────────────┤
+│ [2380, 2347, 2348, 2379, 2381, 2412, 2413] │
+└────────────────────────────────────────────┘
 ```
 
 ----
@@ -1502,6 +1590,72 @@ SELECT seqnum_children(599::UBIGINT, 4);
 ├────────────────────────────────────────────┤
 │ [2380, 2412, 2413, 2381, 2348, 2347, 2379] │
 └────────────────────────────────────────────┘
+```
+
+### seqnum_index_parent
+
+#### Signatures
+
+```sql
+UBIGINT seqnum_index_parent (seqnum UBIGINT, res INTEGER)
+UBIGINT seqnum_index_parent (seqnum UBIGINT, res INTEGER, params STRUCT)
+```
+
+#### Description
+
+Returns the cell's parent at resolution `res - 1` in the grid's **hierarchical indexing system**: Z3 for aperture 3, ZOrder for aperture 4 and Z7 for aperture 7 (DGGRID v9's "indexing parent"). The resolution must be > 0.
+
+The spatial `seqnum_parent` picks the coarser cell under the cell's centre, and a cell on a boundary can touch several (`seqnum_all_parents`). The index hierarchy is instead a strict tree: every cell has exactly one index parent, which is the parent its Z3/ZOrder/Z7 index is built from.
+
+::: info
+Only for single-aperture `HEXAGON` grids (not aperture sequences).
+:::
+
+#### Example
+
+```sql
+SELECT seqnum_index_parent(2381::UBIGINT, 5);
+```
+```
+┌───────────────────────────────────────────────┐
+│ seqnum_index_parent(CAST(2381 AS UBIGINT), 5) │
+│                    uint64                     │
+├───────────────────────────────────────────────┤
+│                                           599 │
+└───────────────────────────────────────────────┘
+```
+
+### seqnum_index_children
+
+#### Signatures
+
+```sql
+UBIGINT[] seqnum_index_children (seqnum UBIGINT, res INTEGER)
+UBIGINT[] seqnum_index_children (seqnum UBIGINT, res INTEGER, params STRUCT)
+```
+
+#### Description
+
+Returns the cell's children at resolution `res + 1` in the grid's hierarchical indexing system (the cells whose `seqnum_index_parent` is this cell): 4 for aperture 4, 3 for aperture 3 and 7 for aperture 7. Unlike `seqnum_children`, the index children of different cells never overlap, so taking them for every cell at one resolution lists each cell of the next resolution exactly once.
+
+::: info
+Only for single-aperture `HEXAGON` grids (not aperture sequences).
+:::
+
+#### Example
+
+```sql
+-- the 4 index children vs the 7 spatial children on the default ISEA4H grid
+SELECT seqnum_index_children(599::UBIGINT, 4) AS index_children,
+       seqnum_children(599::UBIGINT, 4)       AS spatial_children;
+```
+```
+┌──────────────────────────┬────────────────────────────────────────────┐
+│      index_children      │              spatial_children              │
+│         uint64[]         │                  uint64[]                  │
+├──────────────────────────┼────────────────────────────────────────────┤
+│ [2380, 2381, 2412, 2413] │ [2380, 2412, 2413, 2381, 2348, 2347, 2379] │
+└──────────────────────────┴────────────────────────────────────────────┘
 ```
 
 ----
@@ -1661,6 +1815,104 @@ Converts a Z7 index back to a sequential cell index.
 SELECT z7_to_seqnum(1162491653815009279::UBIGINT, 4,
     dggs_params('ISEA', 7, 'HEXAGON', 0.0, 58.28252559, 11.25));
 -- → 100
+```
+
+----
+
+## Coverage & Geodesy
+
+### polygon_to_seqnums
+
+#### Signatures
+
+```sql
+UBIGINT[] polygon_to_seqnums (geom GEOMETRY, res INTEGER)
+UBIGINT[] polygon_to_seqnums (geom GEOMETRY, res INTEGER, params STRUCT)
+```
+
+#### Description
+
+Returns the sequential indices, in ascending order, of every cell whose **centre** lies inside a `POLYGON` or `MULTIPOLYGON`. Holes are excluded, and a `GEOMETRYCOLLECTION` of polygons is treated as their union. Z and M coordinates are ignored.
+
+Because cells are matched on their centre, a polygon smaller than one cell can return an empty list; use a finer resolution, or `geo_to_seqnum` on a point, for tiny areas.
+
+::: warning
+Polygon edges are straight lines in longitude/latitude, so a polygon must not cross the antimeridian (split it into two parts at ±180° first). The function stops with an error once more than 10,000,000 cells are visited. Not supported for `TRIANGLE` topology grids.
+:::
+
+#### Example
+
+```sql
+SELECT polygon_to_seqnums('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))'::GEOMETRY, 4);
+```
+```
+┌───────────────────────────────────────────────────────────────────────────────────┐
+│ polygon_to_seqnums(CAST('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))' AS GEOMETRY), 4) │
+│                                     uint64[]                                      │
+├───────────────────────────────────────────────────────────────────────────────────┤
+│ [600, 601, 617, 618, 634]                                                         │
+└───────────────────────────────────────────────────────────────────────────────────┘
+```
+
+Cover an area and draw the cells (requires the `spatial` extension for display):
+
+```sql
+SELECT seqnum, seqnum_to_boundary(seqnum, 6) AS cell
+FROM (SELECT unnest(polygon_to_seqnums(
+        'POLYGON((-80 40, -70 38, -65 48, -75 50, -80 40))'::GEOMETRY, 6)) AS seqnum);
+```
+
+### geo_distance_km
+
+#### Signature
+
+```sql
+DOUBLE geo_distance_km (a GEOMETRY, b GEOMETRY)
+```
+
+#### Description
+
+Returns the great-circle distance in km between two `POINT` geometries (`x` = longitude, `y` = latitude), on the WGS84 authalic sphere (radius 6371.007 km) that DGGRID uses for its grids.
+
+#### Example
+
+```sql
+-- Ottawa → London
+SELECT geo_distance_km('POINT(-75.7 45.4)'::GEOMETRY, 'POINT(-0.1 51.5)'::GEOMETRY);
+```
+```
+┌──────────────────────────────────────────────────────────────────────────────────────────────┐
+│ geo_distance_km(CAST('POINT(-75.7 45.4)' AS GEOMETRY), CAST('POINT(-0.1 51.5)' AS GEOMETRY)) │
+│                                            double                                            │
+├──────────────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                            5364.664130066861 │
+└──────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### geo_azimuth_deg
+
+#### Signature
+
+```sql
+DOUBLE geo_azimuth_deg (a GEOMETRY, b GEOMETRY)
+```
+
+#### Description
+
+Returns the initial great-circle bearing from point `a` to point `b`, in degrees clockwise from north in `[0, 360)` (0 = north, 90 = east).
+
+#### Example
+
+```sql
+SELECT geo_azimuth_deg('POINT(-75.7 45.4)'::GEOMETRY, 'POINT(-0.1 51.5)'::GEOMETRY);
+```
+```
+┌──────────────────────────────────────────────────────────────────────────────────────────────┐
+│ geo_azimuth_deg(CAST('POINT(-75.7 45.4)' AS GEOMETRY), CAST('POINT(-0.1 51.5)' AS GEOMETRY)) │
+│                                            double                                            │
+├──────────────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                            53.92508306310388 │
+└──────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ----

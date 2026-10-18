@@ -3,7 +3,7 @@ layout: home
 hero:
   name: duck_dggs
   text: DGGS for DuckDB
-  tagline: Discrete Global Grid Systems powered by DGGRID v8
+  tagline: Discrete Global Grid Systems powered by DGGRID v9
   image:
     src: /duck_dggs_icon.svg
     alt: duck_dggs

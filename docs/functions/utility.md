@@ -22,7 +22,7 @@ SELECT duck_dggs_version();
 │  duck_dggs_version()  │
 │        varchar        │
 ├───────────────────────┤
-│ f7dbd3d (DGGRID 8.44) │
+│ f7dbd3d (DGGRID 9.0b) │
 └───────────────────────┘
 ```
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -203,5 +204,51 @@ SeqNum z3ToSeqNum(const DggsParams &p, uint64_t value);
 
 Z7Coord seqNumToZ7(const DggsParams &p, SeqNum seqnum);
 SeqNum z7ToSeqNum(const DggsParams &p, uint64_t value);
+
+// ===========================================================================
+// Index hierarchy — parent / children under the grid's Z3 (aperture 3),
+// ZOrder (aperture 4) or Z7 (aperture 7) indexing system.  Unlike the
+// spatial seqNumParent / seqNumChildren, every cell has exactly one index
+// parent and the index children of distinct cells never overlap.
+// ===========================================================================
+
+SeqNum seqNumIndexParent(const DggsParams &p, SeqNum seqnum);
+std::vector<SeqNum> seqNumIndexChildren(const DggsParams &p, SeqNum seqnum);
+
+// ===========================================================================
+// K-ring — the cell plus every cell within k neighbor steps, ordered by ring
+// (the cell first), each ring sorted ascending.
+// ===========================================================================
+
+std::vector<SeqNum> seqNumKRing(const DggsParams &p, SeqNum seqnum, int k);
+
+// ===========================================================================
+// Geodesy
+// ===========================================================================
+
+// True spherical area (km²) of one cell, on the WGS84 authalic sphere.
+double seqNumCellAreaKM(const DggsParams &p, SeqNum seqnum);
+
+// Great-circle distance (km) on the WGS84 authalic sphere.
+double geoDistanceKM(double lon1, double lat1, double lon2, double lat2);
+
+// Initial great-circle bearing from point 1 to point 2, degrees clockwise
+// from north in [0, 360).
+double geoAzimuthDeg(double lon1, double lat1, double lon2, double lat2);
+
+// ===========================================================================
+// Polygon coverage
+// ===========================================================================
+
+// A polygon: the exterior ring followed by any holes, each an open or closed
+// vertex list in lon/lat degrees.
+using GeoPolygon = std::vector<std::vector<GeoCoord>>;
+
+// Sequence numbers (ascending) of every cell whose centre lies inside any of
+// the polygons.  Edges are straight lines in lon/lat, so polygons must not
+// cross the antimeridian.  Throws once more than max_cells cells are visited.
+std::vector<SeqNum> polygonToSeqNums(const DggsParams &p,
+                                     const std::vector<GeoPolygon> &polys,
+                                     std::size_t max_cells = 10000000);
 
 } // namespace dggrid

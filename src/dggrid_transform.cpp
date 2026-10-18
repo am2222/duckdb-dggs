@@ -1,7 +1,8 @@
 // dggrid_transform.cpp
 //
 // All coordinate transforms and grid utilities implemented against the
-// DGGRID v8 dglib API, verified against the actual v8 header files:
+// DGGRID dglib API (v9; written against v8 and ported — only the Z*
+// hierarchical index frames changed), verified against the header files:
 //
 //   DgIDGGBase.h   — the Q2DI frame + all RF accessors
 //   DgBoundedIDGG.h — SEQNUM linearisation
@@ -41,7 +42,7 @@
 
 #include "dggrid_transform.hpp"
 
-// ── dglib v8 headers ──────────────────────────────────────────────────────
+// ── dglib headers ──────────────────────────────────────────────────────
 #include <dglib/DgRFNetwork.h>
 #include <dglib/DgGeoSphRF.h>    // DgGeoSphRF, DgGeoSphDegRF
 #include <dglib/DgEllipsoidRF.h> // DgGeoCoord (.latDegs / .lonDegs)
@@ -53,22 +54,21 @@
 #include <dglib/DgApSeq.h>       // DgApSeq (aperture sequence support)
 #include <dglib/DgProjTriRF.h>   // DgProjTriRF, DgProjTriCoord, DgPlaneTriRF
 #include <dglib/DgIDGGutil.h> // DgQ2DDCoord, DgQ2DDRF, DgPlaneTriRF, DgVertex2DDRF
-#include <dglib/DgGridTopo.h>       // Hexagon, Triangle, Diamond, D4, D6
-#include <dglib/DgLocation.h>       // DgLocation
-#include <dglib/DgPolygon.h>        // DgPolygon / DgLocVector (cell boundary)
-#include <dglib/DgCell.h>           // DgCell
-#include <dglib/DgIVec2D.h>         // DgIVec2D (.i(), .j())
-#include <dglib/DgDVec2D.h>         // DgDVec2D (.x(), .y())
-#include <dglib/DgConstants.h>      // M_PIl, M_ZERO
-#include <dglib/DgZOrderStringRF.h> // DgZOrderStringRF, DgZOrderStringCoord (must come before DgZOrderRF.h for MSVC)
-#include <dglib/DgZOrderRF.h>       // DgZOrderRF, DgZOrderCoord
-#include <dglib/DgZ3StringRF.h> // DgZ3StringRF, DgZ3StringCoord (must come before DgZ3RF.h for MSVC)
-#include <dglib/DgZ3RF.h> // DgZ3RF, DgZ3Coord
-#include <dglib/DgZ7StringRF.h> // DgZ7StringRF, DgZ7StringCoord (must come before DgZ7RF.h for MSVC)
-#include <dglib/DgZ7RF.h> // DgZ7RF, DgZ7Coord
+#include <dglib/DgGridTopo.h>     // Hexagon, Triangle, Diamond, D4, D6
+#include <dglib/DgLocation.h>     // DgLocation
+#include <dglib/DgPolygon.h>      // DgPolygon / DgLocVector (cell boundary)
+#include <dglib/DgCell.h>         // DgCell
+#include <dglib/DgIVec2D.h>       // DgIVec2D (.i(), .j())
+#include <dglib/DgDVec2D.h>       // DgDVec2D (.x(), .y())
+#include <dglib/DgConstants.h>    // M_PIl, M_ZERO
+#include <dglib/DgHierNdx.h>      // DgHierNdx (int + string index)
+#include <dglib/DgHierNdxIntRF.h> // DgHierNdxIntCoord (.value())
+#include <dglib/DgHierNdxSystemRFBase.h>  // per-resolution Z* index RF
+#include <dglib/DgHierNdxSystemRFSBase.h> // Z* system factory (makeSystem)
 
 #include <algorithm>
 #include <cmath>
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -76,10 +76,12 @@
 #include <sstream>
 #include <stdexcept>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace dggrid {
 
 using namespace dgg::topo; // Hexagon, Triangle, Diamond, D4, D6, ...
+using dgg::addtype::DgHierNdxSysType;
 
 // ===========================================================================
 // DgLocation RAII wrapper
@@ -88,6 +90,20 @@ using namespace dgg::topo; // Hexagon, Triangle, Diamond, D4, D6, ...
 // makeLocation() returns a raw DgLocation* that must be deleted.
 // Wrap it immediately to avoid leaks.
 using LocPtr = std::unique_ptr<DgLocation>;
+
+// ===========================================================================
+// Sequence number validation
+// ===========================================================================
+
+// dglib aborts the whole process on a sequence number outside the grid, so
+// every seqnum → Q2DI lookup goes through here first.
+static DgQ2DICoord q2diFromSeqNum(const DgBoundedIDGG &bnd, uint64_t seqnum) {
+  if (seqnum < 1 || seqnum > bnd.size())
+    throw std::invalid_argument(
+        "seqnum " + std::to_string(seqnum) + " is out of range 1–" +
+        std::to_string(bnd.size()) + " for this resolution");
+  return bnd.addFromSeqNum(static_cast<unsigned long long int>(seqnum));
+}
 
 // ===========================================================================
 // Transformer
@@ -111,11 +127,18 @@ struct Transformer {
   const DgPlaneTriRF *planeRF = nullptr;  // dgg.planeRF()
   const DgBoundedIDGG *bndRF = nullptr;   // dgg.bndRF()  (SEQNUM)
 
-  // Hierarchical address frames (may be null depending on aperture/topology)
+  // Hierarchical address frames (may be null depending on aperture/topology).
+  // DGGRID v9 replaced the per-IDGG z*RF() accessors with standalone
+  // hierarchical indexing systems built over the whole IDGGS; these point at
+  // the system's RF for this resolution.
   const DgVertex2DDRF *vertexRF = nullptr; // dgg.vertexRF() - always available
-  const DgZOrderRF *zorderRF = nullptr;    // dgg.zorderRF() - aperture 3/4 only
-  const DgZ3RF *z3RF = nullptr;            // dgg.z3RF() - aperture 3 only
-  const DgZ7RF *z7RF = nullptr;            // dgg.z7RF() - aperture 7 only
+  const DgHierNdxSystemRFBase *zorderRF = nullptr; // pure aperture 3/4 hexagon
+  const DgHierNdxSystemRFBase *z3RF = nullptr;     // pure aperture 3 hexagon
+  const DgHierNdxSystemRFBase *z7RF = nullptr;     // pure aperture 7 hexagon
+
+  // The grid's native indexing hierarchy (Z3 for aperture 3, ZOrder for 4,
+  // Z7 for 7) across all resolutions; drives the index parent/children.
+  const DgHierNdxSystemRFSBase *hierSys = nullptr;
 
   // ── inX: create a DgLocation in the named source frame ──────────────
 
@@ -150,8 +173,7 @@ struct Transformer {
 
   LocPtr inSEQNUM(uint64_t seqnum) const {
     // bndRF maps seqnum → DgQ2DICoord, then we make a location in dgg
-    DgQ2DICoord q2di =
-        bndRF->addFromSeqNum(static_cast<unsigned long long int>(seqnum));
+    DgQ2DICoord q2di = q2diFromSeqNum(*bndRF, seqnum);
     return LocPtr(dgg->makeLocation(q2di));
   }
 
@@ -221,30 +243,41 @@ struct Transformer {
   }
 
   void outZORDER(LocPtr &loc, uint64_t &out_value) const {
-    if (!zorderRF)
-      throw std::runtime_error(
-          "ZORDER not available for this aperture (use aperture 3 or 4)");
-    zorderRF->convert(loc.get());
-    const DgZOrderCoord *c = zorderRF->getAddress(*loc);
-    out_value = c->value();
+    outHierNdx(zorderRF,
+               "ZORDER not available for this aperture (use aperture 3 or 4)",
+               loc, out_value);
   }
 
   void outZ3(LocPtr &loc, uint64_t &out_value) const {
-    if (!z3RF)
-      throw std::runtime_error(
-          "Z3 not available (requires aperture 3 hexagon grid)");
-    z3RF->convert(loc.get());
-    const DgZ3Coord *c = z3RF->getAddress(*loc);
-    out_value = c->value();
+    outHierNdx(z3RF, "Z3 not available (requires aperture 3 hexagon grid)", loc,
+               out_value);
   }
 
   void outZ7(LocPtr &loc, uint64_t &out_value) const {
-    if (!z7RF)
-      throw std::runtime_error(
-          "Z7 not available (requires aperture 7 hexagon grid)");
-    z7RF->convert(loc.get());
-    const DgZ7Coord *c = z7RF->getAddress(*loc);
-    out_value = c->value();
+    outHierNdx(z7RF, "Z7 not available (requires aperture 7 hexagon grid)", loc,
+               out_value);
+  }
+
+  // ── Z* hierarchical index helpers (shared by ZORDER / Z3 / Z7) ─────────
+
+  static void outHierNdx(const DgHierNdxSystemRFBase *rf, const char *err,
+                         LocPtr &loc, uint64_t &out_value) {
+    if (!rf)
+      throw std::runtime_error(err);
+    rf->convert(loc.get());
+    out_value = static_cast<uint64_t>(rf->getAddress(*loc)->intNdx().value());
+  }
+
+  static LocPtr inHierNdx(const DgHierNdxSystemRFBase *rf, const char *err,
+                          uint64_t value) {
+    if (!rf)
+      throw std::runtime_error(err);
+    // Conversion back to Q2DI goes through the digit-string form, so derive
+    // it from the integer before building the location.
+    DgHierNdx ndx;
+    ndx.setIntNdx(DgHierNdxIntCoord(value));
+    rf->setStringFromIntCoord(ndx);
+    return LocPtr(rf->makeLocation(ndx));
   }
 
   // ── inX for hierarchical types ──────────────────────────────────────────
@@ -260,27 +293,19 @@ struct Transformer {
   }
 
   LocPtr inZORDER(uint64_t value) const {
-    if (!zorderRF)
-      throw std::runtime_error(
-          "ZORDER not available for this aperture (use aperture 3 or 4)");
-    DgZOrderCoord coord(value);
-    return LocPtr(zorderRF->makeLocation(coord));
+    return inHierNdx(
+        zorderRF,
+        "ZORDER not available for this aperture (use aperture 3 or 4)", value);
   }
 
   LocPtr inZ3(uint64_t value) const {
-    if (!z3RF)
-      throw std::runtime_error(
-          "Z3 not available (requires aperture 3 hexagon grid)");
-    DgZ3Coord coord(value);
-    return LocPtr(z3RF->makeLocation(coord));
+    return inHierNdx(
+        z3RF, "Z3 not available (requires aperture 3 hexagon grid)", value);
   }
 
   LocPtr inZ7(uint64_t value) const {
-    if (!z7RF)
-      throw std::runtime_error(
-          "Z7 not available (requires aperture 7 hexagon grid)");
-    DgZ7Coord coord(value);
-    return LocPtr(z7RF->makeLocation(coord));
+    return inHierNdx(
+        z7RF, "Z7 not available (requires aperture 7 hexagon grid)", value);
   }
 };
 
@@ -401,8 +426,9 @@ static std::shared_ptr<Transformer> buildTransformer(const DggsParams &p) {
   if (p.is_aperture_sequence) {
     DgApSeq apSeq(p.aperture_sequence, "CustomApSeq");
     idggs = DgHexIDGGS::makeRF(net, *t->geoRF, vert0, azDegs, p.aperture, nRes,
-                               "HexIDGGS", p.projection, apSeq,
-                               true,  // isApSeq = true
+                               "HexIDGGS", p.projection,
+                               true, // isApSeq = true
+                               apSeq,
                                false, // isMixed43
                                0,     // numAp4
                                false  // isSuperfund
@@ -432,9 +458,31 @@ static std::shared_ptr<Transformer> buildTransformer(const DggsParams &p) {
 
   // ── Resolve hierarchical address frames (may be null) ─────────────────
   t->vertexRF = &dgg.vertexRF(); // Always available
-  t->zorderRF = dgg.zorderRF();  // Null if aperture 7
-  t->z3RF = dgg.z3RF();          // Null if not aperture 3
-  t->z7RF = dgg.z7RF();          // Null if not aperture 7
+
+  // makeSystem() reports a dglib Fatal error (which exits the process) for an
+  // unsupported grid, so only ask for the systems the grid can carry:
+  // hexagon grids of a single pure aperture. (v8's z*RF() also existed on
+  // aperture-sequence grids; v9 refuses those.) The RF network owns the
+  // systems.
+  if (topo == Hexagon && idggs->isPure()) {
+    auto make = [&](DgHierNdxSysType type, const char *name) {
+      return DgHierNdxSystemRFSBase::makeSystem(*idggs, type,
+                                                dgg::addtype::Int64, name);
+    };
+    if (p.aperture == 7) {
+      t->hierSys = make(dgg::addtype::Z7, "Z7");
+      t->z7RF = &t->hierSys->sysRF(p.res);
+    } else if (p.aperture == 3 || p.aperture == 4) {
+      const DgHierNdxSystemRFSBase *zorder =
+          make(dgg::addtype::ZOrder, "ZOrder");
+      t->zorderRF = &zorder->sysRF(p.res);
+      t->hierSys = zorder;
+      if (p.aperture == 3) {
+        t->hierSys = make(dgg::addtype::Z3, "Z3");
+        t->z3RF = &t->hierSys->sysRF(p.res);
+      }
+    }
+  }
 
   return t;
 }
@@ -872,8 +920,7 @@ std::vector<GeoCoord> seqNumToBoundary(const DggsParams &p, SeqNum seqnum) {
   auto t = getTransformer(p);
 
   // Resolve Q2DI from the sequence number.
-  DgQ2DICoord q2di =
-      t->bndRF->addFromSeqNum(static_cast<unsigned long long int>(seqnum));
+  DgQ2DICoord q2di = q2diFromSeqNum(*t->bndRF, seqnum);
 
   // setAddVertices fills the polygon with boundary vertices already converted
   // to the reference frame the DgPolygon was constructed with (geoRF here).
@@ -974,8 +1021,7 @@ std::vector<SeqNum> seqNumChildren(const DggsParams &p, SeqNum seqnum) {
   auto t = getTransformer(p_with_children);
 
   const DgIDGGBase &parent_dgg = t->idggs->idggBase(p.res);
-  DgQ2DICoord q2di = parent_dgg.bndRF().addFromSeqNum(
-      static_cast<unsigned long long int>(seqnum));
+  DgQ2DICoord q2di = q2diFromSeqNum(parent_dgg.bndRF(), seqnum);
   DgResAdd<DgQ2DICoord> q2diR(q2di, p.res);
 
   DgLocVector children;
@@ -1061,6 +1107,274 @@ SeqNum z7ToSeqNum(const DggsParams &p, uint64_t value) {
   SeqNum r = 0;
   t->outSEQNUM(loc, r);
   return r;
+}
+
+// ===========================================================================
+// INDEX HIERARCHY — parent / children under the grid's Z3 / ZOrder / Z7
+// indexing system (DGGRID v9 "indexing parent/children")
+// ===========================================================================
+
+static const DgHierNdxSystemRFSBase &requireHierSys(const Transformer &t) {
+  if (!t.hierSys)
+    throw std::runtime_error(
+        "Index hierarchy not available (requires a single-aperture 3, 4 or 7 "
+        "hexagon grid)");
+  return *t.hierSys;
+}
+
+SeqNum seqNumIndexParent(const DggsParams &p, SeqNum seqnum) {
+  if (p.res <= 0)
+    throw std::runtime_error("Cannot get parent: already at resolution 0");
+
+  auto t = getTransformer(p);
+  const auto &sys = requireHierSys(*t);
+  DgResAdd<DgQ2DICoord> q2diR(q2diFromSeqNum(*t->bndRF, seqnum), p.res);
+
+  DgLocation parent(sys);
+  sys.setNdxParent(q2diR, parent);
+
+  // The parent comes back as a hierarchical index; map it to Q2DI and on to
+  // a sequence number at the parent resolution.
+  const DgHierNdx &ndx = sys.getAddress(parent)->address();
+  DgQ2DICoord q2di = sys.sysRF(p.res - 1).invQuantify(ndx);
+  return static_cast<SeqNum>(
+      t->idggs->idggBase(p.res - 1).bndRF().seqNumAddress(q2di));
+}
+
+std::vector<SeqNum> seqNumIndexChildren(const DggsParams &p, SeqNum seqnum) {
+  // DGGRID's own setNdxChildren() is only right for Z7: in v9.03b the Z3 and
+  // ZOrder versions are copies of the Z7 one and append digits 0-6, giving
+  // invalid indices for aperture 3 and 4. The parent rule (drop the last
+  // digit) is correct for all three, so take the children to be exactly the
+  // cells whose index parent is this cell. They always lie within two rings
+  // of the child cell under the parent's centre.
+  const DggsParams child_p = p.withRes(p.res + 1);
+  requireHierSys(*getTransformer(child_p));
+
+  const GeoCoord centre = seqNumToGeo(p, seqnum);
+  const SeqNum centre_child =
+      geoToSeqNum(child_p, centre.lon_deg, centre.lat_deg);
+
+  std::vector<SeqNum> result;
+  for (SeqNum c : seqNumKRing(child_p, centre_child, 2))
+    if (seqNumIndexParent(child_p, c) == seqnum)
+      result.push_back(c);
+  return result;
+}
+
+// ===========================================================================
+// K-RING
+// ===========================================================================
+
+// Appends the neighbors of a cell (as seqnums) to out.
+static void appendNeighbors(const Transformer &t, SeqNum seqnum,
+                            std::vector<SeqNum> &out) {
+  auto loc = t.inSEQNUM(seqnum);
+  DgLocVector neighbors(*t.dgg);
+  t.dgg->setNeighbors(*loc, neighbors);
+  for (int i = 0; i < neighbors.size(); i++) {
+    const DgQ2DICoord *q2di = t.dgg->getAddress(neighbors[i]);
+    out.push_back(static_cast<SeqNum>(t.bndRF->seqNumAddress(*q2di)));
+  }
+}
+
+std::vector<SeqNum> seqNumKRing(const DggsParams &p, SeqNum seqnum, int k) {
+  if (k < 0)
+    throw std::invalid_argument("k must be >= 0, got " + std::to_string(k));
+  auto t = getTransformer(p);
+  if (t->dgg->gridTopo() == Triangle)
+    throw std::runtime_error("Neighbors not implemented for Triangle grids");
+
+  // Round-trip through the grid so an out-of-range seqnum fails here.
+  SeqNum center = seqNumToSeqNum(p, seqnum);
+  std::vector<SeqNum> result{center};
+  std::unordered_set<SeqNum> seen{center};
+  std::size_t ring_begin = 0;
+  std::vector<SeqNum> nbrs;
+  for (int ring = 1; ring <= k; ring++) {
+    const std::size_t ring_end = result.size();
+    for (std::size_t i = ring_begin; i < ring_end; i++) {
+      nbrs.clear();
+      appendNeighbors(*t, result[i], nbrs);
+      for (SeqNum nb : nbrs)
+        if (seen.insert(nb).second)
+          result.push_back(nb);
+    }
+    if (result.size() == ring_end)
+      break; // the whole grid is covered
+    // Each ring is sorted so the output does not depend on traversal order.
+    std::sort(result.begin() + static_cast<std::ptrdiff_t>(ring_end),
+              result.end());
+    ring_begin = ring_end;
+  }
+  return result;
+}
+
+// ===========================================================================
+// PER-CELL AREA / GEODESY
+// ===========================================================================
+
+double seqNumCellAreaKM(const DggsParams &p, SeqNum seqnum) {
+  auto t = getTransformer(p);
+  DgQ2DICoord q2di = q2diFromSeqNum(*t->bndRF, seqnum);
+  DgPolygon poly(*t->geoRF);
+  t->dgg->setAddVertices(q2di, poly, 0 /* densify */);
+
+  auto loc = t->inSEQNUM(seqnum);
+  t->geoRF->convert(loc.get());
+  const DgGeoCoord center = *t->geoRF->getAddress(*loc);
+
+  // geoPolyArea is in steradians on the unit sphere.
+  const long double r = DgGeoSphRF::earthRadiusKM();
+  return static_cast<double>(DgGeoCoord::geoPolyArea(poly, center) * r * r);
+}
+
+double geoDistanceKM(double lon1, double lat1, double lon2, double lat2) {
+  const DgGeoCoord a(static_cast<long double>(lon1),
+                     static_cast<long double>(lat1), false);
+  const DgGeoCoord b(static_cast<long double>(lon2),
+                     static_cast<long double>(lat2), false);
+  return static_cast<double>(DgGeoCoord::gcDist(a, b) * DEFAULT_RADIUS_KM);
+}
+
+double geoAzimuthDeg(double lon1, double lat1, double lon2, double lat2) {
+  const DgGeoCoord a(static_cast<long double>(lon1),
+                     static_cast<long double>(lat1), false);
+  const DgGeoCoord b(static_cast<long double>(lon2),
+                     static_cast<long double>(lat2), false);
+  double az = static_cast<double>(DgGeoSphRF::azimuth(a, b, false));
+  // Normalise to [0, 360) so 0 is north and 90 is east.
+  az = std::fmod(az, 360.0);
+  return az < 0 ? az + 360.0 : az;
+}
+
+// ===========================================================================
+// POLYGON COVERAGE
+// ===========================================================================
+
+// Even-odd point-in-polygon over every ring (so holes are excluded), on the
+// plane of lon/lat degrees.
+static bool pointInPolygon(const GeoPolygon &poly, double lon, double lat) {
+  bool inside = false;
+  for (const auto &ring : poly) {
+    const std::size_t n = ring.size();
+    for (std::size_t i = 0, j = n - 1; i < n; j = i++) {
+      const auto &a = ring[i];
+      const auto &b = ring[j];
+      if ((a.lat_deg > lat) != (b.lat_deg > lat) &&
+          lon < (b.lon_deg - a.lon_deg) * (lat - a.lat_deg) /
+                        (b.lat_deg - a.lat_deg) +
+                    a.lon_deg)
+        inside = !inside;
+    }
+  }
+  return inside;
+}
+
+// Approximate spherical area (km²) enclosed by a ring, from the line-integral
+// formula of Chamberlain & Duquette (2007); the sign follows the winding.
+static double ringAreaKM(const std::vector<GeoCoord> &ring) {
+  constexpr double kDegToRad = static_cast<double>(M_PI_180);
+  double sum = 0.0;
+  for (std::size_t i = 0; i < ring.size(); i++) {
+    const auto &a = ring[i];
+    const auto &b = ring[(i + 1) % ring.size()];
+    sum += (b.lon_deg - a.lon_deg) * kDegToRad *
+           (2.0 + std::sin(a.lat_deg * kDegToRad) +
+            std::sin(b.lat_deg * kDegToRad));
+  }
+  const double r = static_cast<double>(DgGeoSphRF::earthRadiusKM());
+  return sum * r * r / 2.0;
+}
+
+std::vector<SeqNum> polygonToSeqNums(const DggsParams &p,
+                                     const std::vector<GeoPolygon> &polys,
+                                     std::size_t max_cells) {
+  auto t = getTransformer(p);
+  if (t->dgg->gridTopo() == Triangle)
+    throw std::runtime_error(
+        "polygon_to_seqnums is not implemented for Triangle grids");
+
+  // Refuse oversized requests up front rather than after flooding max_cells
+  // cells (which takes minutes): estimate the count from the polygon area.
+  double area_km = 0.0;
+  for (const auto &poly : polys)
+    for (std::size_t r = 0; r < poly.size(); r++)
+      area_km += (r == 0 ? 1.0 : -1.0) * std::abs(ringAreaKM(poly[r]));
+  const double est_cells =
+      area_km / static_cast<double>(t->dgg->gridStats().cellAreaKM());
+  if (est_cells > static_cast<double>(max_cells))
+    throw std::runtime_error("polygon_to_seqnums: about " +
+                             std::to_string(static_cast<uint64_t>(est_cells)) +
+                             " cells, more than the limit of " +
+                             std::to_string(max_cells) +
+                             "; use a coarser resolution");
+
+  // Seed with every cell the boundary passes through, sampling each edge
+  // finely enough (a quarter of the cell spacing; a degree of longitude is
+  // never longer than one of latitude) that no boundary cell is skipped.
+  const double step_deg =
+      static_cast<double>(t->dgg->gridStats().cellDistKM()) / 4.0 / 111.32;
+  std::unordered_set<SeqNum> seeds;
+  for (const auto &poly : polys) {
+    for (const auto &ring : poly) {
+      for (std::size_t i = 0; i < ring.size(); i++) {
+        const auto &a = ring[i];
+        const auto &b = ring[(i + 1) % ring.size()];
+        const double len =
+            std::hypot(b.lon_deg - a.lon_deg, b.lat_deg - a.lat_deg);
+        const auto steps = static_cast<std::size_t>(std::ceil(len / step_deg));
+        for (std::size_t s = 0; s <= steps; s++) {
+          const double f = steps ? static_cast<double>(s) / steps : 0.0;
+          seeds.insert(geoToSeqNum(p, a.lon_deg + f * (b.lon_deg - a.lon_deg),
+                                   a.lat_deg + f * (b.lat_deg - a.lat_deg)));
+          if (seeds.size() > max_cells)
+            throw std::runtime_error(
+                "polygon_to_seqnums: boundary crosses more than " +
+                std::to_string(max_cells) + " cells; use a coarser resolution");
+        }
+      }
+    }
+  }
+
+  // Flood fill from the seeds: a cell is kept when its centre lies inside a
+  // polygon. Every region of kept cells borders the boundary, so expanding
+  // through kept cells and seeds reaches all of them without scanning cells
+  // that are far outside.
+  std::unordered_set<SeqNum> seen(seeds.begin(), seeds.end());
+  std::deque<SeqNum> frontier(seeds.begin(), seeds.end());
+  std::vector<SeqNum> result;
+  std::vector<SeqNum> nbrs;
+  while (!frontier.empty()) {
+    const SeqNum cell = frontier.front();
+    frontier.pop_front();
+
+    auto loc = t->inSEQNUM(cell);
+    double lon = 0, lat = 0;
+    t->outGEO(loc, lon, lat);
+    const bool inside =
+        std::any_of(polys.begin(), polys.end(), [&](const GeoPolygon &poly) {
+          return pointInPolygon(poly, lon, lat);
+        });
+    if (inside)
+      result.push_back(cell);
+    if (!inside && !seeds.count(cell))
+      continue;
+
+    nbrs.clear();
+    appendNeighbors(*t, cell, nbrs);
+    for (SeqNum nb : nbrs) {
+      if (seen.insert(nb).second)
+        frontier.push_back(nb);
+    }
+    if (seen.size() > max_cells)
+      throw std::runtime_error("polygon_to_seqnums: more than " +
+                               std::to_string(max_cells) +
+                               " cells; use a coarser resolution");
+  }
+
+  std::sort(result.begin(), result.end());
+  return result;
 }
 
 } // namespace dggrid

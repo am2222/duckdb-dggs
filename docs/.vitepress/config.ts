@@ -2,7 +2,7 @@ import { defineConfig } from 'vitepress'
 
 export default defineConfig({
   title: 'duck_dggs',
-  description: 'DuckDB extension for Discrete Global Grid Systems powered by DGGRID v8',
+  description: 'DuckDB extension for Discrete Global Grid Systems powered by DGGRID v9',
   base: '/duckdb-dggs/',
   head: [
     ['link', { rel: 'icon', href: '/duckdb-dggs/favicon.svg' }]
@@ -35,6 +35,7 @@ export default defineConfig({
           { text: 'Neighbors', link: '/functions/neighbors' },
           { text: 'Parent / Child', link: '/functions/parent-child' },
           { text: 'Hierarchical Indexes', link: '/functions/hierarchical-indexes' },
+          { text: 'Coverage & Geodesy', link: '/functions/coverage-geodesy' },
         ]
       }
     ],

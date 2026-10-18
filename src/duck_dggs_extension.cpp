@@ -1563,6 +1563,269 @@ static void Vertex2DDToSeqNumParamsFun(DataChunk &args, ExpressionState &,
 }
 
 // ===========================================================================
+// Shared helpers for the list-returning functions below
+// ===========================================================================
+
+// Writes one UBIGINT list per row.
+static void WriteSeqNumLists(Vector &result,
+                             const std::vector<std::vector<uint64_t>> &all) {
+  idx_t total = 0;
+  for (auto &l : all)
+    total += l.size();
+  ListVector::Reserve(result, total);
+  auto list_entries = ListEntriesMutable(result);
+  auto &child = ListChildMutable(result);
+  auto child_data = MutableData<uint64_t>(child);
+  idx_t offset = 0;
+  for (idx_t i = 0; i < all.size(); i++) {
+    list_entries[i].offset = offset;
+    list_entries[i].length = all[i].size();
+    for (auto v : all[i])
+      child_data[offset++] = v;
+  }
+  ListVector::SetListSize(result, total);
+}
+
+// Runs fn(params, row) for every row of a (..., res [, params]) call, with
+// res read from column res_col and params from the column after it when
+// has_params is set.
+template <class FN>
+static void ForEachRowParams(DataChunk &args, idx_t res_col, bool has_params,
+                             FN &&fn) {
+  idx_t n = args.size();
+  ArgReader<int32_t> res(args, res_col, n);
+  if (!has_params) {
+    for (idx_t i = 0; i < n; i++)
+      fn(paramsWithRes(res[i]), i);
+    return;
+  }
+  ParamsReader params(args.data[res_col + 1], n);
+  for (idx_t i = 0; i < n; i++) {
+    auto p = params[i];
+    p.res = res[i];
+    fn(p, i);
+  }
+}
+
+// ===========================================================================
+// INDEX PARENT / CHILDREN  (seqnum UBIGINT, res INTEGER [, params])
+// ===========================================================================
+
+template <bool PARAMS>
+static void SeqNumIndexParentFun(DataChunk &args, ExpressionState &,
+                                 Vector &result) {
+  ArgReader<uint64_t> seqnum(args, 0, args.size());
+  auto *out = MutableData<uint64_t>(result);
+  ForEachRowParams(args, 1, PARAMS, [&](const dggrid::DggsParams &p, idx_t i) {
+    out[i] = dggrid::seqNumIndexParent(p, seqnum[i]);
+  });
+}
+
+template <bool PARAMS>
+static void SeqNumIndexChildrenFun(DataChunk &args, ExpressionState &,
+                                   Vector &result) {
+  ArgReader<uint64_t> seqnum(args, 0, args.size());
+  std::vector<std::vector<uint64_t>> all(args.size());
+  ForEachRowParams(args, 1, PARAMS, [&](const dggrid::DggsParams &p, idx_t i) {
+    all[i] = dggrid::seqNumIndexChildren(p, seqnum[i]);
+  });
+  WriteSeqNumLists(result, all);
+}
+
+// ===========================================================================
+// K-RING  (seqnum UBIGINT, k INTEGER, res INTEGER [, params])  → UBIGINT[]
+// ===========================================================================
+
+template <bool PARAMS>
+static void SeqNumKRingFun(DataChunk &args, ExpressionState &, Vector &result) {
+  ArgReader<uint64_t> seqnum(args, 0, args.size());
+  ArgReader<int32_t> k(args, 1, args.size());
+  std::vector<std::vector<uint64_t>> all(args.size());
+  ForEachRowParams(args, 2, PARAMS, [&](const dggrid::DggsParams &p, idx_t i) {
+    all[i] = dggrid::seqNumKRing(p, seqnum[i], k[i]);
+  });
+  WriteSeqNumLists(result, all);
+}
+
+// ===========================================================================
+// CELL AREA  (seqnum UBIGINT, res INTEGER [, params])  → DOUBLE
+// ===========================================================================
+
+template <bool PARAMS>
+static void SeqNumCellAreaKMFun(DataChunk &args, ExpressionState &,
+                                Vector &result) {
+  ArgReader<uint64_t> seqnum(args, 0, args.size());
+  auto *out = MutableData<double>(result);
+  ForEachRowParams(args, 1, PARAMS, [&](const dggrid::DggsParams &p, idx_t i) {
+    out[i] = dggrid::seqNumCellAreaKM(p, seqnum[i]);
+  });
+}
+
+// ===========================================================================
+// GEODESY  (a GEOMETRY, b GEOMETRY)  → DOUBLE
+// ===========================================================================
+
+static void GeoDistanceKMFun(DataChunk &args, ExpressionState &,
+                             Vector &result) {
+  BinaryExecutor::Execute<string_t, string_t, double>(
+      args.data[0], args.data[1], result, args.size(),
+      [](string_t a, string_t b) {
+        double lon1, lat1, lon2, lat2;
+        ReadPointXY(a, lon1, lat1);
+        ReadPointXY(b, lon2, lat2);
+        return dggrid::geoDistanceKM(lon1, lat1, lon2, lat2);
+      });
+}
+
+static void GeoAzimuthDegFun(DataChunk &args, ExpressionState &,
+                             Vector &result) {
+  BinaryExecutor::Execute<string_t, string_t, double>(
+      args.data[0], args.data[1], result, args.size(),
+      [](string_t a, string_t b) {
+        double lon1, lat1, lon2, lat2;
+        ReadPointXY(a, lon1, lat1);
+        ReadPointXY(b, lon2, lat2);
+        return dggrid::geoAzimuthDeg(lon1, lat1, lon2, lat2);
+      });
+}
+
+// ===========================================================================
+// POLYGON COVERAGE  (geom GEOMETRY, res INTEGER [, params])  → UBIGINT[]
+// ===========================================================================
+
+// Minimal WKB reader for POLYGON / MULTIPOLYGON (and GEOMETRYCOLLECTIONs of
+// them). Handles either byte order and the ISO / EWKB Z and M flags; only x
+// and y are kept.
+class PolygonWKBReader {
+public:
+  explicit PolygonWKBReader(const string_t &geom)
+      : data_(reinterpret_cast<const uint8_t *>(geom.GetData())),
+        size_(geom.GetSize()) {}
+
+  std::vector<dggrid::GeoPolygon> Read() {
+    std::vector<dggrid::GeoPolygon> polys;
+    ReadGeometry(polys);
+    return polys;
+  }
+
+private:
+  struct Header {
+    uint32_t type;
+    uint32_t dims;
+  };
+
+  void Need(std::size_t n) const {
+    if (off_ + n > size_)
+      throw InvalidInputException("polygon_to_seqnums: truncated WKB");
+  }
+  // Copies n bytes at the cursor into out, reversing them for big-endian
+  // WKB (the extension only targets little-endian hosts).
+  void Take(void *out, std::size_t n) {
+    Need(n);
+    auto *o = static_cast<uint8_t *>(out);
+    for (std::size_t i = 0; i < n; i++)
+      o[i] = data_[off_ + (le_ ? i : n - 1 - i)];
+    off_ += n;
+  }
+  uint32_t U32() {
+    uint32_t v;
+    Take(&v, 4);
+    return v;
+  }
+  double F64() {
+    double d;
+    Take(&d, 8);
+    return d;
+  }
+
+  Header ReadHeader() {
+    Need(1);
+    le_ = data_[off_++] == 1;
+    uint32_t raw = U32();
+    uint32_t dims = 2;
+    if (raw & 0x80000000u) // EWKB Z
+      dims++;
+    if (raw & 0x40000000u) // EWKB M
+      dims++;
+    if (raw & 0x20000000u) // EWKB SRID
+      U32();
+    uint32_t type = raw & 0x0FFFFFFFu;
+    // ISO: 1000s digit flags Z (1), M (2) or ZM (3).
+    switch (type / 1000) {
+    case 1:
+    case 2:
+      dims = 3;
+      break;
+    case 3:
+      dims = 4;
+      break;
+    default:
+      break;
+    }
+    return {type % 1000, dims};
+  }
+
+  void ReadPolygonBody(uint32_t dims, std::vector<dggrid::GeoPolygon> &out) {
+    dggrid::GeoPolygon poly;
+    const uint32_t num_rings = U32();
+    for (uint32_t r = 0; r < num_rings; r++) {
+      const uint32_t num_points = U32();
+      Need(static_cast<std::size_t>(num_points) * dims * 8);
+      std::vector<dggrid::GeoCoord> ring;
+      ring.reserve(num_points);
+      for (uint32_t i = 0; i < num_points; i++) {
+        dggrid::GeoCoord c;
+        c.lon_deg = F64();
+        c.lat_deg = F64();
+        for (uint32_t d = 2; d < dims; d++)
+          F64();
+        ring.push_back(c);
+      }
+      if (ring.size() >= 3)
+        poly.push_back(std::move(ring));
+    }
+    if (!poly.empty())
+      out.push_back(std::move(poly));
+  }
+
+  void ReadGeometry(std::vector<dggrid::GeoPolygon> &out) {
+    const Header h = ReadHeader();
+    switch (h.type) {
+    case 3: // POLYGON
+      ReadPolygonBody(h.dims, out);
+      break;
+    case 6: // MULTIPOLYGON
+    case 7: // GEOMETRYCOLLECTION
+    {
+      const uint32_t n = U32();
+      for (uint32_t i = 0; i < n; i++)
+        ReadGeometry(out);
+      break;
+    }
+    default:
+      throw InvalidInputException(
+          "polygon_to_seqnums expects a POLYGON or MULTIPOLYGON geometry");
+    }
+  }
+
+  const uint8_t *data_;
+  std::size_t size_;
+  std::size_t off_ = 0;
+  bool le_ = true;
+};
+
+template <bool PARAMS>
+static void PolygonToSeqNumsFun(DataChunk &args, ExpressionState &,
+                                Vector &result) {
+  ArgReader<string_t> geom(args, 0, args.size());
+  std::vector<std::vector<uint64_t>> all(args.size());
+  ForEachRowParams(args, 1, PARAMS, [&](const dggrid::DggsParams &p, idx_t i) {
+    all[i] = dggrid::polygonToSeqNums(p, PolygonWKBReader(geom[i]).Read());
+  });
+  WriteSeqNumLists(result, all);
+}
+
+// ===========================================================================
 // Registration
 // ===========================================================================
 
@@ -2044,6 +2307,80 @@ static void LoadInternal(ExtensionLoader &loader) {
        "aperture 7 hexagon grids only.",
        HIER,
        ISEA7H});
+
+  // ── INDEX HIERARCHY (DGGRID v9 indexing parent / children) ───────────────
+  reg("seqnum_index_parent", {UB, I}, UB, SeqNumIndexParentFun<false>,
+      SeqNumIndexParentFun<true>,
+      {SEQ_RES, SEQ_EX,
+       "Returns the sequential index of the cell's parent at resolution "
+       "res - 1 in the grid's hierarchical indexing system (Z3 for aperture "
+       "3, ZOrder for 4, Z7 for 7). Every cell has exactly one index parent, "
+       "even where it straddles several spatial parents; single-aperture "
+       "hexagon grids only.",
+       HIER});
+  reg("seqnum_index_children", {UB, I}, LIST_UB, SeqNumIndexChildrenFun<false>,
+      SeqNumIndexChildrenFun<true>,
+      {SEQ_RES, "599::UBIGINT, 4",
+       "Returns the sequential indices of the cell's children at resolution "
+       "res + 1 in the grid's hierarchical indexing system (Z3, ZOrder or "
+       "Z7). Unlike seqnum_children, the index children of different cells "
+       "never overlap; single-aperture hexagon grids only.",
+       HIER});
+
+  // ── K-RING ────────────────────────────────────────────────────────────────
+  reg("seqnum_k_ring", {UB, I, I}, LIST_UB, SeqNumKRingFun<false>,
+      SeqNumKRingFun<true>,
+      {{"seqnum", "k", "res"},
+       "2380::UBIGINT, 1, 5",
+       "Returns the cell and every cell within k neighbor steps of it, "
+       "ordered by distance in steps (the cell itself first) and ascending "
+       "within each ring.",
+       {"dggs", "neighbors"}});
+
+  // ── PER-CELL AREA ─────────────────────────────────────────────────────────
+  reg("seqnum_cell_area_km", {UB, I}, D, SeqNumCellAreaKMFun<false>,
+      SeqNumCellAreaKMFun<true>,
+      {SEQ_RES, SEQ_EX,
+       "Returns the true spherical area in km² of one cell, on the WGS84 "
+       "authalic sphere. Unlike dggs_cell_area_km, which is the grid "
+       "average, this differs between cells (pentagons are smaller).",
+       STATS});
+
+  // ── POLYGON COVERAGE ──────────────────────────────────────────────────────
+  reg("polygon_to_seqnums", {GEO, I}, LIST_UB, PolygonToSeqNumsFun<false>,
+      PolygonToSeqNumsFun<true>,
+      {GEO_RES,
+       "'POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))'::GEOMETRY, 5",
+       "Returns the sequential indices, ascending, of every cell whose centre "
+       "lies inside a POLYGON or MULTIPOLYGON (holes are excluded). Edges "
+       "are straight lines in longitude/latitude, so the polygon must not "
+       "cross the antimeridian.",
+       {"dggs", "coverage"}});
+
+  // ── GEODESY (grid independent) ────────────────────────────────────────────
+  auto reg_geodesy = [&](const char *name, scalar_function_t fn,
+                         const char *description) {
+    const vector<string> names = {"a", "b"};
+    CreateScalarFunctionInfo info(WithParameterNames(
+        ScalarFunction(name, {GEO, GEO}, D, std::move(fn)), names));
+    info.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
+    FunctionDescription desc;
+    desc.parameter_types = {GEO, GEO};
+    desc.parameter_names = names;
+    desc.description = description;
+    desc.examples = {string(name) + "('POINT(-75.7 45.4)'::GEOMETRY, "
+                                    "'POINT(-0.1 51.5)'::GEOMETRY)"};
+    desc.categories = {"dggs", "geodesy"};
+    info.descriptions.push_back(std::move(desc));
+    loader.RegisterFunction(std::move(info));
+  };
+  reg_geodesy("geo_distance_km", GeoDistanceKMFun,
+              "Returns the great-circle distance in km between two POINT "
+              "geometries (x = longitude, y = latitude), on the WGS84 "
+              "authalic sphere DGGRID uses.");
+  reg_geodesy("geo_azimuth_deg", GeoAzimuthDegFun,
+              "Returns the initial great-circle bearing from point a to "
+              "point b, in degrees clockwise from north in [0, 360).");
 
   // ── IGEO7 / Z7 bit-level index manipulation ──────────────────────────────
   RegisterIGeo7Functions(loader);
