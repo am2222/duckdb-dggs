@@ -1,0 +1,13 @@
+{
+  "name": "wasm-sqllogictest",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Runs a DuckDB extension's sqllogictest files against its WASM build in Node.",
+  "bin": { "wasm-sqllogictest": "run.mjs" },
+  "dependencies": {
+    "@haybarn/haybarn-wasm": "2.0.0-rc5",
+    "web-worker": "1.2.0"
+  },
+  "engines": { "node": ">=20" }
+}
