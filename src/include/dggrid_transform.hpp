@@ -12,7 +12,7 @@ namespace dggrid {
 // ===========================================================================
 
 struct DggsParams {
-  std::string projection = "ISEA";  // ISEA or FULLER
+  std::string projection = "ISEA";  // ISEA, IVEA, FULLER or GNOMONIC
   unsigned int aperture = 4;        // 3, 4, or 7
   std::string topology = "HEXAGON"; // HEXAGON, TRIANGLE, DIAMOND
   int res = 5;                      // 0–30
@@ -21,6 +21,11 @@ struct DggsParams {
   double pole_lon_deg = 11.25;       // ISEA default
   bool is_aperture_sequence = false;
   std::string aperture_sequence;
+  // Datum of geographic input and output coordinates. The grid itself is
+  // always built on the WGS84 authalic sphere; with WGS84, lon/lat are
+  // geodetic and their latitudes are mapped to and from authalic latitude
+  // (DGGRID's input_datum / output_datum).
+  std::string datum = "AUTHALIC_SPHERE"; // AUTHALIC_SPHERE or WGS84
 
   DggsParams withRes(int r) const {
     DggsParams p = *this;
@@ -104,6 +109,12 @@ DggsParams construct(const std::string &projection, unsigned int aperture,
                      const std::string &aperture_sequence = "");
 
 DggsParams setRes(const DggsParams &p, int res);
+
+// The grid configuration of one of DGGRID's named dggs_type presets, e.g.
+// "ISEA4H", "IVEA7HL" or "IGEO7v2" (case-insensitive). A trailing Z (the
+// hierarchically indexed variants) is accepted and changes nothing, since
+// every grid exposes its index. res is left at its default.
+DggsParams preset(const std::string &name);
 std::vector<ResInfo> getRes(const DggsParams &p);
 ResInfo getResAt(const DggsParams &p, int res);
 uint64_t maxCell(const DggsParams &p, int res = -1);
@@ -215,6 +226,11 @@ SeqNum z7ToSeqNum(const DggsParams &p, uint64_t value);
 SeqNum seqNumIndexParent(const DggsParams &p, SeqNum seqnum);
 std::vector<SeqNum> seqNumIndexChildren(const DggsParams &p, SeqNum seqnum);
 
+// The index in its indexing system's own text form (e.g. "0800432" for Z7),
+// and back.
+std::string seqNumToIndexString(const DggsParams &p, SeqNum seqnum);
+SeqNum indexStringToSeqNum(const DggsParams &p, const std::string &ndx);
+
 // ===========================================================================
 // K-ring — the cell plus every cell within k neighbor steps, ordered by ring
 // (the cell first), each ring sorted ascending.
@@ -226,7 +242,8 @@ std::vector<SeqNum> seqNumKRing(const DggsParams &p, SeqNum seqnum, int k);
 // Geodesy
 // ===========================================================================
 
-// True spherical area (km²) of one cell, on the WGS84 authalic sphere.
+// True area (km²) of one cell, on the WGS84 authalic sphere (and so also on
+// the WGS84 ellipsoid, which that sphere maps onto equal-area).
 double seqNumCellAreaKM(const DggsParams &p, SeqNum seqnum);
 
 // Great-circle distance (km) on the WGS84 authalic sphere.

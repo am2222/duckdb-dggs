@@ -1,16 +1,16 @@
 <div align="center">
   <img src="duck_dggs_icon.svg" width="240" alt="duck_dggs"/>
   <h1>duck_dggs</h1>
-  <p>A DuckDB extension for discrete global grid systems (DGGS) powered by <a href="https://github.com/sahrk/DGGRID">DGGRID v9</a>.<br/>
+  <p>A DuckDB extension for discrete global grid systems (DGGS) powered by <a href="https://github.com/sahrk/DGGRID">DGGRID v9.1</a>.<br/>
   Transforms geographic coordinates to and from DGGS cell identifiers across multiple coordinate reference frames.</p>
-  <p><strong><a href="https://am2222.github.io/duckdb-dggs/">Documentation</a></strong></p>
+  <p><strong><a href="https://am2222.github.io/duckdb-dggs/">Documentation</a> · <a href="CHANGELOG.md">Changelog</a></strong></p>
   <p>
     <a href="https://github.com/am2222/duckdb-dggs/actions/workflows/MainDistributionPipeline.yml"><img src="https://img.shields.io/github/actions/workflow/status/am2222/duckdb-dggs/MainDistributionPipeline.yml?branch=main&style=flat&label=CI" alt="CI"/></a>
     <a href="https://am2222.github.io/duckdb-dggs/"><img src="https://img.shields.io/github/actions/workflow/status/am2222/duckdb-dggs/docs.yml?branch=main&style=flat&label=docs" alt="Docs"/></a>
     <a href="test/sql"><img src="https://img.shields.io/badge/SQL%20tests-176-brightgreen?style=flat" alt="SQL tests: 176"/></a>
     <a href="https://github.com/am2222/duckdb-dggs/releases"><img src="https://img.shields.io/github/v/release/am2222/duckdb-dggs?style=flat&label=release" alt="Release"/></a>
     <a href="https://github.com/duckdb/duckdb"><img src="https://img.shields.io/badge/DuckDB-v2.0-FFF000?style=flat" alt="DuckDB v2.0"/></a>
-    <a href="https://github.com/sahrk/DGGRID"><img src="https://img.shields.io/badge/DGGRID-v9.03b-blue?style=flat" alt="DGGRID v9.03b"/></a>
+    <a href="https://github.com/sahrk/DGGRID"><img src="https://img.shields.io/badge/DGGRID-v9.1-blue?style=flat" alt="DGGRID v9.1"/></a>
     <a href="LICENSE"><img src="https://img.shields.io/github/license/am2222/duckdb-dggs?style=flat" alt="License"/></a>
   </p>
 </div>
@@ -34,7 +34,7 @@ SELECT geo_to_seqnum('POINT(0.0 0.0)'::GEOMETRY, 5);
 
 -- Cell ID → cell centre point
 SELECT seqnum_to_geo(2380, 5);
--- → POINT (-0.9020481125846749 -1.2067949803565235e-09)
+-- → POINT (-0.9020481122620776 1.4282740292403947e-09)
 
 -- Cell ID → cell boundary polygon (requires the spatial extension)
 LOAD spatial;
@@ -150,6 +150,8 @@ Every function has a second overload that accepts an explicit [`dggs_params`](#d
 | [`seqnum_children`](#seqnum_children) | SEQNUM, res | `UBIGINT[]` | Child cells at res+1. |
 | [`seqnum_index_parent`](#seqnum_index_parent) | SEQNUM, res | `UBIGINT` | Parent in the Z3/ZOrder/Z7 index hierarchy (strict tree). |
 | [`seqnum_index_children`](#seqnum_index_children) | SEQNUM, res | `UBIGINT[]` | Children in the Z3/ZOrder/Z7 index hierarchy (non-overlapping). |
+| [`seqnum_to_index_string`](#seqnum_to_index_string) | SEQNUM, res | `VARCHAR` | Z3/ZOrder/Z7 index in its text form (base cell + one digit per resolution). |
+| [`index_string_to_seqnum`](#index_string_to_seqnum) | VARCHAR, res | `UBIGINT` | Index text form back to a sequential index. |
 | [`seqnum_k_ring`](#seqnum_k_ring) | SEQNUM, k, res | `UBIGINT[]` | The cell plus every cell within k neighbor steps. |
 | [`seqnum_cell_area_km`](#seqnum_cell_area_km) | SEQNUM, res | `DOUBLE` | True spherical area of one cell in km². |
 | [`polygon_to_seqnums`](#polygon_to_seqnums) | GEOMETRY, res | `UBIGINT[]` | Cells whose centre lies inside a (multi)polygon. |
@@ -216,6 +218,29 @@ SELECT duck_dggs_version();
 
 ----
 
+### dggs_preset
+
+#### Signature
+
+```sql
+STRUCT dggs_preset (name VARCHAR)
+```
+
+#### Description
+
+Returns the `dggs_params` struct of one of DGGRID v9.1's named grids:
+`IGEO7v1` (ISEA7H on the authalic sphere), `IGEO7v2` / `IGEO7` (ISEA7H with
+WGS84 lon/lat), or `<ISEA|IVEA|FULLER><3H|4H|7H|4T|4D>` with an optional `S`
+(authalic sphere) or `L` (WGS84) suffix. Case-insensitive; a trailing `Z` is
+accepted.
+
+#### Example
+
+```sql
+SELECT geo_to_seqnum('POINT(10 45)'::GEOMETRY, 9, dggs_preset('IGEO7v2'));
+-- → 85043108
+```
+
 ### dggs_params
 
 #### Signature
@@ -226,9 +251,14 @@ STRUCT dggs_params (projection VARCHAR, aperture INTEGER, topology VARCHAR,
 STRUCT dggs_params (projection VARCHAR, aperture INTEGER, topology VARCHAR,
                    azimuth_deg DOUBLE, pole_lat_deg DOUBLE, pole_lon_deg DOUBLE,
                    is_aperture_sequence BOOLEAN, aperture_sequence VARCHAR)
+
+STRUCT dggs_params (projection VARCHAR, aperture INTEGER, topology VARCHAR,
+                   azimuth_deg DOUBLE, pole_lat_deg DOUBLE, pole_lon_deg DOUBLE,
+                   is_aperture_sequence BOOLEAN, aperture_sequence VARCHAR,
+                   datum VARCHAR)
 ```
 
-Return type: `STRUCT(projection VARCHAR, aperture INTEGER, topology VARCHAR, azimuth_deg DOUBLE, pole_lat_deg DOUBLE, pole_lon_deg DOUBLE, is_aperture_sequence BOOLEAN, aperture_sequence VARCHAR)`
+Return type: `STRUCT(projection VARCHAR, aperture INTEGER, topology VARCHAR, azimuth_deg DOUBLE, pole_lat_deg DOUBLE, pole_lon_deg DOUBLE, is_aperture_sequence BOOLEAN, aperture_sequence VARCHAR, datum VARCHAR)`
 
 #### Description
 
@@ -238,7 +268,7 @@ orientation and topology.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `projection` | `VARCHAR` | Projection type. `'ISEA'` (Icosahedral Snyder Equal Area) or `'FULLER'`. |
+| `projection` | `VARCHAR` | Projection type. `'ISEA'` (Icosahedral Snyder Equal Area), `'IVEA'` (Icosahedral Vertex-oriented Equal Area), `'FULLER'` or `'GNOMONIC'`. |
 | `aperture` | `INTEGER` | Cell aperture (ratio of parent to child cell area). `3`, `4`, or `7`. |
 | `topology` | `VARCHAR` | Cell shape. `'HEXAGON'`, `'TRIANGLE'`, or `'DIAMOND'`. |
 | `azimuth_deg` | `DOUBLE` | Rotation of the icosahedron around the pole axis, in degrees. |
@@ -246,6 +276,7 @@ orientation and topology.
 | `pole_lon_deg` | `DOUBLE` | Longitude of the icosahedron pole, in degrees. Default ISEA: `11.25`. |
 | `is_aperture_sequence` | `BOOLEAN` | When `true`, uses a mixed-aperture sequence instead of a fixed aperture. Default: `false`. |
 | `aperture_sequence` | `VARCHAR` | A string of digits (`'3'`, `'4'`, `'7'`) defining the aperture at each resolution level. Only used when `is_aperture_sequence` is `true`. |
+| `datum` | `VARCHAR` | Datum of lon/lat input and output: `'AUTHALIC_SPHERE'` (default) or `'WGS84'` (geodetic latitudes are mapped to and from the authalic sphere the grid is built on). |
 
 The resolution is **not** part of `dggs_params`; it is always passed as a
 separate `INTEGER` argument to the transform function.
@@ -509,7 +540,7 @@ SELECT seqnum_to_geo(2380, 5);
 │               seqnum_to_geo(2380, 5)                │
 │                      geometry                       │
 ├─────────────────────────────────────────────────────┤
-│ POINT (-0.9020481125846749 -1.2067949803565235e-09) │
+│ POINT (-0.9020481122620776 1.4282740292403947e-09) │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -523,7 +554,7 @@ SELECT seqnum_to_geo(2380, 5, dggs_params('ISEA', 4, 'HEXAGON', 0.0, 58.28252559
 │ seqnum_to_geo(2380, 5, dggs_params('ISEA', 4, 'HEXAGON', 0.0, 58.28252559, 11.25)) │
 │                                      geometry                                      │
 ├────────────────────────────────────────────────────────────────────────────────────┤
-│ POINT (-0.9020481125846749 -1.2067949803565235e-09)                                │
+│ POINT (-0.9020481122620776 1.4282740292403947e-09)                                │
 └────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -755,7 +786,7 @@ SELECT q2di_to_geo(3, 10, 10, 5);
 │              q2di_to_geo(3, 10, 10, 5)              │
 │                      geometry                       │
 ├─────────────────────────────────────────────────────┤
-│ POINT (-0.9020481125846749 -1.2067949803565235e-09) │
+│ POINT (-0.9020481122620776 1.4282740292403947e-09) │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -1114,7 +1145,7 @@ SELECT projtri_to_geo(7, 0.6875, 0.0, 5);
 │          projtri_to_geo(7, 0.6875, 0.0, 5)          │
 │                      geometry                       │
 ├─────────────────────────────────────────────────────┤
-│ POINT (-0.9020481125846892 -1.2068163334689483e-09) │
+│ POINT (-0.9020481122620759 1.4282708486857131e-09)  │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -1660,6 +1691,51 @@ SELECT seqnum_index_children(599::UBIGINT, 4) AS index_children,
 ├──────────────────────────┼────────────────────────────────────────────┤
 │ [2380, 2381, 2412, 2413] │ [2380, 2412, 2413, 2381, 2348, 2347, 2379] │
 └──────────────────────────┴────────────────────────────────────────────┘
+```
+
+### seqnum_to_index_string
+
+#### Signatures
+
+```sql
+VARCHAR seqnum_to_index_string (seqnum UBIGINT, res INTEGER)
+VARCHAR seqnum_to_index_string (seqnum UBIGINT, res INTEGER, params STRUCT)
+```
+
+#### Description
+
+Returns the cell's index in the text form of the grid's hierarchical indexing
+system (Z3, ZOrder or Z7): two base-cell digits followed by one digit per
+resolution, so a cell's string starts with its index parent's. Single-aperture
+`HEXAGON` grids only.
+
+#### Example
+
+```sql
+SELECT seqnum_to_index_string(100::UBIGINT, 4, dggs_preset('ISEA7H'));
+-- → 010041
+```
+
+### index_string_to_seqnum
+
+#### Signatures
+
+```sql
+UBIGINT index_string_to_seqnum (index VARCHAR, res INTEGER)
+UBIGINT index_string_to_seqnum (index VARCHAR, res INTEGER, params STRUCT)
+```
+
+#### Description
+
+Converts an index string back to a sequential cell index. Strings of the wrong
+length, with digits outside the aperture, or naming no cell (such as a
+pentagon's skipped digit) are errors.
+
+#### Example
+
+```sql
+SELECT index_string_to_seqnum('010041', 4, dggs_preset('ISEA7H'));
+-- → 100
 ```
 
 ----

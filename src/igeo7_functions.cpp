@@ -13,7 +13,7 @@
 
 #include "igeo7_functions.hpp"
 
-#include "duck_dggs_compat.hpp"
+#include "duck_dggs_registration.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/vector_operations/generic_executor.hpp"
 #include "duckdb/function/scalar_function.hpp"
@@ -127,14 +127,14 @@ void GetNeighboursFunction(DataChunk &args, ExpressionState &, Vector &result) {
 
   // Flatten so FlatVector::GetData is safe for any input vector shape
   // (e.g. CONSTANT_VECTOR from constant folding).
-  FlattenVector(input, count);
+  input.Flatten();
 
-  auto *list_entries = ListEntriesMutable(result);
-  auto &child = ListChildMutable(result);
+  auto *list_entries = FlatVector::GetDataMutable<list_entry_t>(result);
+  auto &child = ListVector::GetChildMutable(result);
   ListVector::SetListSize(result, count * 6);
 
   auto input_data = FlatVector::GetData<uint64_t>(input);
-  auto child_data = MutableData<uint64_t>(child);
+  auto child_data = FlatVector::GetDataMutable<uint64_t>(child);
   auto &input_validity = FlatVector::Validity(input);
 
   for (idx_t i = 0; i < count; i++) {
@@ -200,8 +200,8 @@ void EncodeFunction(DataChunk &args, ExpressionState &, Vector &result) {
 
   const idx_t count = args.size();
   result.SetVectorType(VectorType::FLAT_VECTOR);
-  auto *result_data = MutableData<uint64_t>(result);
-  auto &result_validity = MutableValidity(result);
+  auto *result_data = FlatVector::GetDataMutable<uint64_t>(result);
+  auto &result_validity = FlatVector::ValidityMutable(result);
 
   // Accept either UTINYINT (typed columns) or INTEGER (literal overload).
   auto read_val = [](const UnifiedVectorFormat &fmt, idx_t row_idx) -> int64_t {
@@ -214,11 +214,11 @@ void EncodeFunction(DataChunk &args, ExpressionState &, Vector &result) {
   };
 
   UnifiedVectorFormat base_fmt;
-  ToUnified(args.data[0], count, base_fmt);
+  args.data[0].ToUnifiedFormat(base_fmt);
 
   UnifiedVectorFormat digit_fmt[N_DIGITS];
   for (int k = 0; k < N_DIGITS; k++) {
-    ToUnified(args.data[k + 1], count, digit_fmt[k]);
+    args.data[k + 1].ToUnifiedFormat(digit_fmt[k]);
   }
 
   for (idx_t i = 0; i < count; i++) {
@@ -401,8 +401,7 @@ void AuthalicToGeoFunction(DataChunk &args, ExpressionState &, Vector &result) {
 // Pack base + 20 digits, then truncate to the given resolution (slots after
 // `res` are overwritten with 7 = padding). Equivalent to
 //   igeo7_parent_at(igeo7_encode(base, d1..d20), res)
-// but registered as a single scalar so it's available whenever the extension
-// is loaded (DuckDB v1.5's DefaultMacro caps parameters at 8; this has 22).
+// but registered as a single scalar.
 void EncodeAtResolutionFunction(DataChunk &args, ExpressionState &,
                                 Vector &result) {
   static constexpr int N_DIGITS = 20;
@@ -412,8 +411,8 @@ void EncodeAtResolutionFunction(DataChunk &args, ExpressionState &,
 
   const idx_t count = args.size();
   result.SetVectorType(VectorType::FLAT_VECTOR);
-  auto *result_data = MutableData<uint64_t>(result);
-  auto &result_validity = MutableValidity(result);
+  auto *result_data = FlatVector::GetDataMutable<uint64_t>(result);
+  auto &result_validity = FlatVector::ValidityMutable(result);
 
   auto read_val = [](const UnifiedVectorFormat &fmt, idx_t row_idx) -> int64_t {
     if (fmt.physical_type == PhysicalType::UINT8) {
@@ -425,14 +424,14 @@ void EncodeAtResolutionFunction(DataChunk &args, ExpressionState &,
   };
 
   UnifiedVectorFormat base_fmt;
-  ToUnified(args.data[0], count, base_fmt);
+  args.data[0].ToUnifiedFormat(base_fmt);
 
   UnifiedVectorFormat res_fmt;
-  ToUnified(args.data[1], count, res_fmt);
+  args.data[1].ToUnifiedFormat(res_fmt);
 
   UnifiedVectorFormat digit_fmt[N_DIGITS];
   for (int k = 0; k < N_DIGITS; k++) {
-    ToUnified(args.data[k + 2], count, digit_fmt[k]);
+    args.data[k + 2].ToUnifiedFormat(digit_fmt[k]);
   }
 
   for (idx_t i = 0; i < count; i++) {
@@ -640,9 +639,6 @@ void RegisterIGeo7Functions(ExtensionLoader &loader) {
              "igeo7_encode(8, 0, 0, 4, 3, 2, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, "
              "7, 7, 7, 7)");
 
-  // igeo7_encode_at_resolution is a C++ scalar rather than a SQL macro
-  // because DuckDB v1.5's DefaultMacro caps parameters at 8 and this
-  // signature has 22.
   add_encode("igeo7_encode_at_resolution", true, EncodeAtResolutionFunction,
              "Packs a base cell and 20 three-bit digits and truncates the "
              "result to the given resolution, filling slots res+1..20 with "
@@ -655,8 +651,7 @@ void RegisterIGeo7Functions(ExtensionLoader &loader) {
   // These mirror the five macros shipped by the upstream igeo7_duckdb
   // repository (https://github.com/allixender/igeo7_duckdb) so the full
   // convenience surface is available without a separate .read step.
-  // `igeo7_encode_at_resolution` is implemented above as a C++ scalar
-  // (22 parameters; v1.5's DefaultMacro caps at 8).
+  // `igeo7_encode_at_resolution` is implemented above as a C++ scalar.
   struct DocumentedMacro {
     SqlMacro macro;
     const char *description;

@@ -102,6 +102,36 @@ SELECT z7_to_seqnum(1162491653815009279::UBIGINT, 4,
 -- → 100
 ```
 
+## Index Strings
+
+The text form of the grid's own hierarchical index (Z3 for aperture 3, ZOrder for 4, Z7 for 7): two base-cell digits (`00`–`11`) followed by one digit per resolution. A cell's string starts with its [index parent](/functions/parent-child#seqnum_index_parent)'s, so prefix matching finds descendants. Single-aperture `HEXAGON` grids only.
+
+### seqnum_to_index_string
+
+```sql
+VARCHAR seqnum_to_index_string (seqnum UBIGINT, res INTEGER)
+VARCHAR seqnum_to_index_string (seqnum UBIGINT, res INTEGER, params STRUCT)
+```
+
+```sql
+SELECT seqnum_to_index_string(100::UBIGINT, 4, dggs_preset('ISEA7H'));
+-- → 010041
+```
+
+### index_string_to_seqnum
+
+```sql
+UBIGINT index_string_to_seqnum (index VARCHAR, res INTEGER)
+UBIGINT index_string_to_seqnum (index VARCHAR, res INTEGER, params STRUCT)
+```
+
+Converts an index string back to a sequential cell index. Strings of the wrong length, with digits outside the aperture, or naming no cell (such as a pentagon's skipped digit) are errors.
+
+```sql
+SELECT index_string_to_seqnum('010041', 4, dggs_preset('ISEA7H'));
+-- → 100
+```
+
 ## IGEO7 / Z7 Bit-Level Operations
 
 These functions operate directly on the 64-bit packed IGEO7/Z7 index without

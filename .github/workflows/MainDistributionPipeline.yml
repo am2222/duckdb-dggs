@@ -15,16 +15,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # DuckDB v2.0 is the release target. community-extensions builds `repo.ref`
-  # against this exact commit / tag / ci-tools branch (its build.yml), so a
-  # failure here is one that would show up there. Bump all three together when
-  # community-extensions moves (e.g. to the v2.0.0 tag).
+  # community-extensions builds `repo.ref` against DuckDB v2.0.0 with
+  # extension-ci-tools @v2.0-cyanoptera (its build.yml), so a failure here is
+  # one that would show up there. Bump these together when it moves.
   duckdb-stable-build:
     name: Build extension binaries
     uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v2.0-cyanoptera
     with:
-      duckdb_version: b15358c371daf10dad799a43b6167f6ccdce84d8
-      duckdb_tag: v2.0.0-alpha46057
+      duckdb_version: v2.0.0
       ci_tools_version: v2.0-cyanoptera
       extension_name: duck_dggs
 
@@ -32,23 +30,10 @@ jobs:
     name: Code Quality Check
     uses: duckdb/extension-ci-tools/.github/workflows/_extension_code_quality.yml@v2.0-cyanoptera
     with:
-      duckdb_version: b15358c371daf10dad799a43b6167f6ccdce84d8
+      duckdb_version: v2.0.0
       ci_tools_version: v2.0-cyanoptera
       extension_name: duck_dggs
       format_checks: 'format;tidy'
-
-  # Keeps the v1.5 line building. community-extensions only builds DuckDB
-  # v1.5.6 from `repo.variegata` now, and only on request, so these binaries
-  # are a compatibility check and are left out of the GitHub release (their
-  # artifacts carry the -duckdb-v1.5 postfix).
-  duckdb-v15-build:
-    name: Build extension binaries (DuckDB v1.5)
-    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v1.5-variegata
-    with:
-      duckdb_version: v1.5.6
-      ci_tools_version: v1.5-variegata
-      extension_name: duck_dggs
-      artifact_postfix: -duckdb-v1.5
 
   release:
     name: Publish release
@@ -67,12 +52,10 @@ jobs:
       # Each artifact dir is named  duck_dggs-<duckdb version>-extension-<platform>
       # and contains  build/release/extension/duck_dggs/duck_dggs.duckdb_extension
       # Flatten & rename to  duck_dggs-<platform>.duckdb_extension for the release.
-      # The v1.5 build's artifacts end in -duckdb-v1.5 and are not released.
       - name: Collect and rename extension binaries
         run: |
           mkdir -p dist
           for artifact_dir in raw-artifacts/duck_dggs-*-extension-*/; do
-            case "$artifact_dir" in *-duckdb-v1.5/) continue ;; esac
             platform=$(basename "$artifact_dir" | sed 's/.*-extension-//')
             src=$(find "$artifact_dir" -name "duck_dggs.duckdb_extension" | head -1)
             if [ -n "$src" ]; then
@@ -89,7 +72,7 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: "Release ${{ github.ref_name }}"
           body: |
-            Release **${{ github.ref_name }}** built against **DuckDB v2.0** (`v2.0.0-alpha46057`).
+            Release **${{ github.ref_name }}** built against **DuckDB v2.0.0**.
 
             ## Download
 
@@ -119,7 +102,7 @@ jobs:
           tag_name: latest
           name: "Latest build"
           body: |
-            Automated build from the `main` branch against **DuckDB v2.0** (`v2.0.0-alpha46057`).
+            Automated build from the `main` branch against **DuckDB v2.0.0**.
 
             ## Download
 

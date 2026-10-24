@@ -60,30 +60,25 @@ Notes:
   artifact lags your source, tests that reference not-yet-deployed functions
   will fail until the next release is published — that's expected.
 
-## DuckDB v2 compatibility
+## DuckDB version
 
-DuckDB v2.0 is the release target: the `duckdb` submodule and the release build
-pin the same v2 commit that duckdb/community-extensions builds against
-(`v2.0.0-alpha46057`, see duckdb/community-extensions#3081). The sources still
-build against the v1.5 line too. The differences are confined to
-`src/include/duck_dggs_compat.hpp`, which detects the version at compile time
-(`__has_include("duckdb/common/vector/list_vector.hpp")`) and provides shims
-for the calls that changed: writable vector accessors (`MutableData`,
-`MutableValidity`, `ListChildMutable`, `ListEntriesMutable`), the count-less
-`ToUnifiedFormat` / `Flatten` (`ToUnified`, `FlattenVector`), constant
-references (`ReferenceValue`), fallible-function marking (`Fallible`) and the
-SQL macro table (`SqlMacro` / `MakeMacroInfo`). New code should go through
-those shims rather than calling `FlatVector::GetData` etc. directly for writes.
+The extension targets DuckDB v2.0 only: the `duckdb` submodule and the release
+build pin `v2.0.0`, the version duckdb/community-extensions builds against.
+Support for the v1.5 line has been dropped, so code calls the v2 vector API
+directly (`FlatVector::GetDataMutable`, `ListVector::GetChildMutable`,
+`Vector::ToUnifiedFormat(format)`, ...). The few registration helpers live in
+`src/include/duck_dggs_registration.hpp`: `Fallible` (functions that can throw
+must be marked, or v2 turns the error into an internal error),
+`WithParameterNames` (v2 reads parameter names from the function signature,
+not the `FunctionDescription`) and `SqlMacro` / `MakeMacroInfo`.
 
 CI's release build (`duckdb-stable-build` in `MainDistributionPipeline.yml`)
-uses the same DuckDB commit, tag and extension-ci-tools branch as
+uses the same DuckDB version and extension-ci-tools branch as
 community-extensions' `build.yml`, so a red build here is a failure that would
-show up there; bump all three together when community-extensions moves. A
-second job (`duckdb-v15-build`) keeps the v1.5.6 line building. Its artifacts
-carry a `-duckdb-v1.5` suffix and are never attached to a GitHub release.
+show up there; bump both together when community-extensions moves.
 
 Note that DuckDB v2 rejects the single-arrow lambda syntax (`x -> expr`) by
-default; tests use `lambda x: expr`, which both versions accept.
+default; tests use `lambda x: expr`.
 
 ## Releasing
 
@@ -98,8 +93,7 @@ from conventional commits on `main` (`.github/workflows/release-please.yml`):
 3. The same release-please run then opens a PR against
    `duckdb/community-extensions` (via the `am2222/community-extensions` fork)
    that copies this repo's `description.yml` with `repo.ref` (built against
-   DuckDB v2.0) and `repo.variegata` (built against v1.5.6) set to the release
-   commit. `description.yml` here is the source of truth for the listing.
+   DuckDB v2.0) set to the release commit. `description.yml` here is the source of truth for the listing.
 
 Steps 2 and 3 need the `RELEASE_PAT` repository secret: a classic
 personal access token with the `public_repo` scope and push access to the

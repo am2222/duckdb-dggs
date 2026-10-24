@@ -85,14 +85,9 @@ jobs:
         working-directory: community-extensions
         run: |
           target="extensions/$EXT_NAME/description.yml"
-          # Stamp ref (built against DuckDB v2.0) and variegata (built against
-          # v1.5.6) with the release SHA; see duckdb/community-extensions#3081.
-          sed -E "s#^([[:space:]]*(ref|variegata):).*#\1 $SHA#" "../source/description.yml" > "$target"
+          # Stamp ref (built against DuckDB v2.0) with the release SHA.
+          sed -E "s#^([[:space:]]*ref:).*#\1 $SHA#" "../source/description.yml" > "$target"
           grep -q "ref: $SHA" "$target"
-          grep -q "variegata: $SHA" "$target" || {
-            echo "::error::description.yml has no variegata; the upstream v1.5.6 build would use a stale ref"
-            exit 1
-          }
           grep -q "version: $VERSION" "$target" || {
             echo "::error::description.yml does not carry version $VERSION; check the x-release-please-version marker"
             exit 1
