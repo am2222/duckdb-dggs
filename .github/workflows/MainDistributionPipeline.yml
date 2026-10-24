@@ -35,6 +35,21 @@ jobs:
       extension_name: duck_dggs
       format_checks: 'format;tidy'
 
+  # extension-ci-tools builds the WASM extensions but never runs their tests.
+  # This runs test/sql against the freshly built wasm_eh binary in DuckDB-WASM
+  # (the 2.x engine has a single bundle, which loads wasm_eh extensions).
+  wasm-test:
+    name: WASM tests (wasm_eh)
+    needs: duckdb-stable-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/wasm-sqllogictest
+        with:
+          extension: duck_dggs
+          artifact: duck_dggs-v2.0.0-extension-wasm_eh
+
   release:
     name: Publish release
     needs: duckdb-stable-build

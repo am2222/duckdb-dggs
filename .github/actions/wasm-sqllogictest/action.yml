@@ -1,0 +1,119 @@
+name: WASM sqllogictest
+description: >
+  Run a DuckDB extension's sqllogictest files against its WASM build, in a
+  DuckDB-WASM engine under Node.
+
+inputs:
+  extension:
+    description: Extension name, as used in `require <name>` in the tests.
+    required: true
+  extension-file:
+    description: >
+      Path to the built `<name>.duckdb_extension.wasm`. Leave empty and set
+      `artifact` to download it from this workflow run instead.
+    required: false
+    default: ''
+  artifact:
+    description: >
+      Name of an artifact of this workflow run holding the `.wasm` file, e.g.
+      `<name>-v2.0.0-extension-wasm_eh` from extension-ci-tools'
+      `_extension_distribution.yml`.
+    required: false
+    default: ''
+  tests:
+    description: Test files or directories, one per line.
+    required: false
+    default: test/sql
+  include-slow:
+    description: Also run `.test_slow` files.
+    required: false
+    default: 'false'
+  engine-package:
+    description: npm package of the DuckDB-WASM engine.
+    required: false
+    default: '@haybarn/haybarn-wasm'
+  engine-version:
+    description: >
+      Version of `engine-package`. It must be built from the same DuckDB
+      version as the extension.
+    required: false
+    default: 2.0.0-rc5
+  bundle:
+    description: >
+      Engine bundle: `base` (DuckDB-WASM 2.x, platform wasm_eh), or `eh` /
+      `mvp` (1.x). Empty picks the first the engine has.
+    required: false
+    default: ''
+  repositories:
+    description: >
+      Extension repositories, one per line, tried after the engine's own when a
+      test file requires another extension (e.g. spatial).
+    required: false
+    default: https://extensions.duckdb.org
+  timeout:
+    description: Seconds allowed per test file.
+    required: false
+    default: '600'
+  node-version:
+    description: Node.js version.
+    required: false
+    default: '20'
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Download extension artifact
+      if: inputs.artifact != ''
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.artifact }}
+        path: ${{ runner.temp }}/wasm-sqllogictest-extension
+
+    - name: Install engine
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      env:
+        ENGINE_PACKAGE: ${{ inputs.engine-package }}
+        ENGINE_VERSION: ${{ inputs.engine-version }}
+      run: |
+        npm install --no-audit --no-fund --no-save web-worker@1.2.0 "${ENGINE_PACKAGE}@${ENGINE_VERSION}"
+
+    - name: Run tests
+      shell: bash
+      env:
+        EXTENSION: ${{ inputs.extension }}
+        EXTENSION_FILE: ${{ inputs.extension-file }}
+        ARTIFACT: ${{ inputs.artifact }}
+        ARTIFACT_DIR: ${{ runner.temp }}/wasm-sqllogictest-extension
+        TESTS: ${{ inputs.tests }}
+        INCLUDE_SLOW: ${{ inputs.include-slow }}
+        ENGINE_PACKAGE: ${{ inputs.engine-package }}
+        BUNDLE: ${{ inputs.bundle }}
+        REPOSITORIES: ${{ inputs.repositories }}
+        TIMEOUT: ${{ inputs.timeout }}
+        RUNNER: ${{ github.action_path }}/run.mjs
+      run: |
+        file="$EXTENSION_FILE"
+        if [[ -z "$file" ]]; then
+          if [[ -z "$ARTIFACT" ]]; then
+            echo "::error::set either extension-file or artifact"
+            exit 1
+          fi
+          file="$(find "$ARTIFACT_DIR" -name "${EXTENSION}.duckdb_extension.wasm" | head -1)"
+          if [[ -z "$file" ]]; then
+            echo "::error::no ${EXTENSION}.duckdb_extension.wasm in artifact ${ARTIFACT}"
+            exit 1
+          fi
+        fi
+
+        args=(--extension "$EXTENSION" --extension-file "$file" --engine-package "$ENGINE_PACKAGE"
+              --timeout "$TIMEOUT" --json "$RUNNER_TEMP/wasm-sqllogictest-report.json")
+        while IFS= read -r t; do [[ -n "${t// }" ]] && args+=(--tests "$t"); done <<< "$TESTS"
+        while IFS= read -r r; do [[ -n "${r// }" ]] && args+=(--repo "$r"); done <<< "$REPOSITORIES"
+        [[ "$INCLUDE_SLOW" == "true" ]] && args+=(--include-slow)
+        [[ -n "$BUNDLE" ]] && args+=(--bundle "$BUNDLE")
+        node "$RUNNER" "${args[@]}"
