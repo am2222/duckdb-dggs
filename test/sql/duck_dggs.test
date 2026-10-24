@@ -1034,12 +1034,20 @@ SELECT geo_to_seqnum('POINT(10 45)'::GEOMETRY, 9, dggs_params('ISEA', 4, 'HEXAGO
 ----
 true
 
-# WGS84 input is geodetic: the same point lands in a different cell
-query II
-SELECT seqnum_to_geo(geo_to_seqnum('POINT(10 45)'::GEOMETRY, 9, dggs_preset('ISEA4HL')), 9, dggs_preset('ISEA4HL'))::VARCHAR,
-       seqnum_to_geo(geo_to_seqnum('POINT(10 45)'::GEOMETRY, 9, dggs_preset('ISEA4HS')), 9, dggs_preset('ISEA4HS'))::VARCHAR;
+# WGS84 input is geodetic: 45N geodetic is 44.8717N authalic, so on the same
+# grid it lands in the cell of that authalic latitude, not of 45N
+query III
+SELECT geo_to_seqnum('POINT(10 45)'::GEOMETRY, 9, dggs_params('ISEA', 4, 'HEXAGON', 0.0, 58.28252559, 11.25, false, '', 'WGS84')),
+       geo_to_seqnum('POINT(10 44.87170287343394)'::GEOMETRY, 9),
+       geo_to_seqnum('POINT(10 45)'::GEOMETRY, 9);
 ----
-POINT (9.988763537741017 44.99201106375823)	POINT (9.935304674300593 44.98847624534072)
+552895	552895	552383
+
+query II
+SELECT geo_to_seqnum('POINT(10 45)'::GEOMETRY, 9, dggs_preset('ISEA4HL')),
+       geo_to_seqnum('POINT(10 45)'::GEOMETRY, 9, dggs_preset('ISEA4HS'));
+----
+552895	552383
 
 # a WGS84 cell centre maps back to its own cell
 query I
