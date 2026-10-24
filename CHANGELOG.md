@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.2.0](https://github.com/am2222/duckdb-dggs/compare/v0.1.11...v0.2.0) (2026-10-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* the extension only builds against DuckDB v2.0; v1.5 is no longer supported. The dggs_params struct has a new 9th field `datum`, so a hand-built 8-field struct must add it. DGGRID v9.1's exact ISEA constants move cell centres on the equator by about 1e-9 degrees, which can change results for points exactly on a cell edge (e.g. polygon_to_seqnums on a polygon edged at the equator).
+
+### Features
+
+* add dggs_preset for DGGRID's named grids ([abfff8f](https://github.com/am2222/duckdb-dggs/commit/abfff8fee92fe0bf828e13a4ce871820ead5632d))
+* add IVEA and GNOMONIC projections and a WGS84 datum to dggs_params ([abfff8f](https://github.com/am2222/duckdb-dggs/commit/abfff8fee92fe0bf828e13a4ce871820ead5632d))
+* add seqnum_to_index_string and index_string_to_seqnum ([abfff8f](https://github.com/am2222/duckdb-dggs/commit/abfff8fee92fe0bf828e13a4ce871820ead5632d))
+* **duckdb:** add helpers for function registration with DuckDB v2 ([7943f70](https://github.com/am2222/duckdb-dggs/commit/7943f7076f42b749d1c05c4132e8b59c71d4750f))
+* **test:** add WGS84 geodetic input tests for geo_to_seqnum function ([8915621](https://github.com/am2222/duckdb-dggs/commit/891562130bf22d939bbb0833ac37989c61081a6b))
+* upgrade to DGGRID v9.1 and DuckDB v2.0.0, drop DuckDB v1.5 support ([abfff8f](https://github.com/am2222/duckdb-dggs/commit/abfff8fee92fe0bf828e13a4ce871820ead5632d))
+
+
+### Bug Fixes
+
+* raise an error for an unknown projection instead of exiting ([abfff8f](https://github.com/am2222/duckdb-dggs/commit/abfff8fee92fe0bf828e13a4ce871820ead5632d))
+
 ## [0.1.11](https://github.com/am2222/duckdb-dggs/compare/v0.1.10...v0.1.11) (2026-10-18)
 
 
