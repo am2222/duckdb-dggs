@@ -65,8 +65,10 @@
 #include <dglib/DgHierNdxIntRF.h> // DgHierNdxIntCoord (.value())
 #include <dglib/DgHierNdxSystemRFBase.h>  // per-resolution Z* index RF
 #include <dglib/DgHierNdxSystemRFSBase.h> // Z* system factory (makeSystem)
+#include <dglib/DgAuthalicConverter.h>    // DgAuthalic (WGS84 <-> authalic)
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <deque>
 #include <memory>
@@ -106,6 +108,25 @@ static DgQ2DICoord q2diFromSeqNum(const DgBoundedIDGG &bnd, uint64_t seqnum) {
 }
 
 // ===========================================================================
+// Datum
+// ===========================================================================
+
+// The grid lives on the WGS84 authalic sphere. With the WGS84 datum,
+// geographic coordinates are geodetic and only their latitude changes on the
+// way in and out (longitude is the same on both).
+static double geodeticToAuthalicDeg(double lat_deg) {
+  return static_cast<double>(DgAuthalic::geodeticToAuthalicLatitude(
+                                 static_cast<long double>(lat_deg) * M_PI_180) *
+                             M_180_PI);
+}
+
+static double authalicToGeodeticDeg(double lat_deg) {
+  return static_cast<double>(DgAuthalic::authalicToGeodeticLatitude(
+                                 static_cast<long double>(lat_deg) * M_PI_180) *
+                             M_180_PI);
+}
+
+// ===========================================================================
 // Transformer
 // ===========================================================================
 // Owns one fully constructed DgRFNetwork for a (projection, aperture,
@@ -115,6 +136,9 @@ static DgQ2DICoord q2diFromSeqNum(const DgBoundedIDGG &bnd, uint64_t seqnum) {
 struct Transformer {
 
   std::unique_ptr<DgRFNetwork> net;
+
+  // Geographic input and output are WGS84 geodetic (else authalic).
+  bool wgs84 = false;
 
   // Reference frames — raw non-owning pointers into net
   const DgGeoSphRF *geoRF = nullptr;  // GEO (radians)
@@ -143,6 +167,8 @@ struct Transformer {
   // ── inX: create a DgLocation in the named source frame ──────────────
 
   LocPtr inGEO(double lon_deg, double lat_deg) const {
+    if (wgs84)
+      lat_deg = geodeticToAuthalicDeg(lat_deg);
     // DgGeoCoord(lon, lat, false) — third arg false = values are in degrees
     DgGeoCoord geo(static_cast<long double>(lon_deg),
                    static_cast<long double>(lat_deg), false);
@@ -184,6 +210,8 @@ struct Transformer {
     const DgGeoCoord *c = geoRF->getAddress(*loc);
     out_lon = static_cast<double>(c->lonDegs());
     out_lat = static_cast<double>(c->latDegs());
+    if (wgs84)
+      out_lat = authalicToGeodeticDeg(out_lat);
   }
 
   void outPROJTRI(LocPtr &loc, uint64_t &out_tnum, double &out_x,
@@ -323,6 +351,7 @@ struct CacheKey {
   double pole_lon_deg;
   bool is_aperture_sequence;
   std::string aperture_sequence;
+  std::string datum;
 
   bool operator==(const CacheKey &o) const noexcept {
     return projection == o.projection && aperture == o.aperture &&
@@ -330,7 +359,7 @@ struct CacheKey {
            azimuth_deg == o.azimuth_deg && pole_lat_deg == o.pole_lat_deg &&
            pole_lon_deg == o.pole_lon_deg &&
            is_aperture_sequence == o.is_aperture_sequence &&
-           aperture_sequence == o.aperture_sequence;
+           aperture_sequence == o.aperture_sequence && datum == o.datum;
   }
 };
 
@@ -352,6 +381,7 @@ struct CacheKeyHash {
     h = mix(h, std::hash<double>()(k.pole_lon_deg));
     h = mix(h, std::hash<bool>()(k.is_aperture_sequence));
     h = mix(h, std::hash<std::string>()(k.aperture_sequence));
+    h = mix(h, std::hash<std::string>()(k.datum));
     return h;
   }
 };
@@ -368,6 +398,16 @@ static std::shared_ptr<Transformer> buildTransformer(const DggsParams &p) {
   if (p.res < 0 || p.res > 30)
     throw std::invalid_argument("res must be 0–30, got " +
                                 std::to_string(p.res));
+
+  // dglib exits the process on an unknown projection, so check it here.
+  if (p.projection != "ISEA" && p.projection != "IVEA" &&
+      p.projection != "FULLER" && p.projection != "GNOMONIC")
+    throw std::invalid_argument("Unknown projection '" + p.projection +
+                                "'. Use ISEA, IVEA, FULLER or GNOMONIC.");
+
+  if (p.datum != "AUTHALIC_SPHERE" && p.datum != "WGS84")
+    throw std::invalid_argument("Unknown datum '" + p.datum +
+                                "'. Use AUTHALIC_SPHERE or WGS84.");
 
   // Validate aperture sequence constraints
   if (p.is_aperture_sequence) {
@@ -391,6 +431,7 @@ static std::shared_ptr<Transformer> buildTransformer(const DggsParams &p) {
   }
 
   auto t = std::make_shared<Transformer>();
+  t->wgs84 = p.datum == "WGS84";
   t->net = std::make_unique<DgRFNetwork>();
   auto &net = *t->net;
 
@@ -516,16 +557,17 @@ static std::shared_ptr<Transformer> getTransformer(const DggsParams &p) {
       p.is_aperture_sequence == tl_last_params.is_aperture_sequence &&
       p.projection == tl_last_params.projection &&
       p.topology == tl_last_params.topology &&
-      p.aperture_sequence == tl_last_params.aperture_sequence) {
+      p.aperture_sequence == tl_last_params.aperture_sequence &&
+      p.datum == tl_last_params.datum) {
     return tl_last_result;
   }
 
   // ── Global cache lookup ────────────────────────────────────────────────
-  CacheKey key{p.projection,       p.aperture,
-               p.topology,         p.res,
-               p.azimuth_deg,      p.pole_lat_deg,
-               p.pole_lon_deg,     p.is_aperture_sequence,
-               p.aperture_sequence};
+  CacheKey key{p.projection,        p.aperture,
+               p.topology,          p.res,
+               p.azimuth_deg,       p.pole_lat_deg,
+               p.pole_lon_deg,      p.is_aperture_sequence,
+               p.aperture_sequence, p.datum};
   std::shared_ptr<Transformer> result;
   {
     std::shared_lock<std::shared_mutex> rl(s_mutex);
@@ -579,6 +621,83 @@ DggsParams construct(const std::string &projection, unsigned int aperture,
 }
 
 DggsParams setRes(const DggsParams &p, int res) { return p.withRes(res); }
+
+// The icosahedron placements behind DGGRID's orientation presets
+// (dggs_orient_preset). The ISEA latitude is atan(phi) exactly, so these
+// differ slightly from the 58.28252559 of DggsParams' default.
+namespace {
+struct Orientation {
+  double lon_deg, lat_deg, azimuth_deg;
+};
+constexpr Orientation kIsea{11.25, 58.2825255885389946757860968602266473356,
+                            0.0};
+constexpr Orientation kIseaL{11.20, 58.2825255885389946757860968602266473356,
+                             0.0};
+constexpr Orientation kDymaxion{10.5361990754676369448, 64.7000001279348804496,
+                                125.687650893546277353};
+} // namespace
+
+DggsParams preset(const std::string &name) {
+  std::string n;
+  for (char c : name)
+    n += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  const auto unknown = [&]() {
+    return std::invalid_argument(
+        "Unknown preset '" + name +
+        "'. Use IGEO7v1, IGEO7v2, IGEO7, or <ISEA|IVEA|FULLER><3H|4H|7H|4T|4D> "
+        "with an optional S (sphere) or L (WGS84) suffix and a trailing Z.");
+  };
+
+  // IGEO7v1 / IGEO7v2 are the ISEA7HSZ / ISEA7HLZ presets; DGGRID v9.1 made
+  // IGEO7 an alias for IGEO7v2.
+  if (n == "igeo7v1")
+    n = "isea7hsz";
+  else if (n == "igeo7v2" || n == "igeo7")
+    n = "isea7hlz";
+
+  // A Z suffix only turns on hierarchical index output in DGGRID.
+  if (!n.empty() && n.back() == 'z')
+    n.pop_back();
+  // L presets take WGS84 lon/lat; S and the bare names the authalic sphere.
+  const bool ellipsoidal = !n.empty() && n.back() == 'l';
+  if (ellipsoidal || (!n.empty() && n.back() == 's'))
+    n.pop_back();
+
+  DggsParams p;
+  std::string grid;
+  if (n.rfind("isea", 0) == 0) {
+    p.projection = "ISEA";
+    grid = n.substr(4);
+  } else if (n.rfind("ivea", 0) == 0) {
+    p.projection = "IVEA";
+    grid = n.substr(4);
+  } else if (n.rfind("fuller", 0) == 0) {
+    p.projection = "FULLER";
+    grid = n.substr(6);
+  } else {
+    throw unknown();
+  }
+
+  if (grid == "3h" || grid == "4h" || grid == "7h") {
+    p.topology = "HEXAGON";
+  } else if (grid == "4t") {
+    p.topology = "TRIANGLE";
+  } else if (grid == "4d") {
+    p.topology = "DIAMOND";
+  } else {
+    throw unknown();
+  }
+  p.aperture = static_cast<unsigned int>(grid[0] - '0');
+
+  const Orientation &o = ellipsoidal                ? kIseaL
+                         : p.projection == "FULLER" ? kDymaxion
+                                                    : kIsea;
+  p.pole_lon_deg = o.lon_deg;
+  p.pole_lat_deg = o.lat_deg;
+  p.azimuth_deg = o.azimuth_deg;
+  p.datum = ellipsoidal ? "WGS84" : "AUTHALIC_SPHERE";
+  return p;
+}
 
 std::vector<ResInfo> getRes(const DggsParams &p) {
   DggsParams full = p;
@@ -931,8 +1050,9 @@ std::vector<GeoCoord> seqNumToBoundary(const DggsParams &p, SeqNum seqnum) {
   result.reserve(static_cast<std::size_t>(poly.size()));
   for (int i = 0; i < poly.size(); i++) {
     const DgGeoCoord *c = t->geoRF->getAddress(poly[i]);
-    result.push_back(
-        {static_cast<double>(c->lonDegs()), static_cast<double>(c->latDegs())});
+    const double lat = static_cast<double>(c->latDegs());
+    result.push_back({static_cast<double>(c->lonDegs()),
+                      t->wgs84 ? authalicToGeodeticDeg(lat) : lat});
   }
   return result;
 }
@@ -1142,24 +1262,78 @@ SeqNum seqNumIndexParent(const DggsParams &p, SeqNum seqnum) {
 }
 
 std::vector<SeqNum> seqNumIndexChildren(const DggsParams &p, SeqNum seqnum) {
-  // DGGRID's own setNdxChildren() is only right for Z7: in v9.03b the Z3 and
-  // ZOrder versions are copies of the Z7 one and append digits 0-6, giving
-  // invalid indices for aperture 3 and 4. The parent rule (drop the last
-  // digit) is correct for all three, so take the children to be exactly the
-  // cells whose index parent is this cell. They always lie within two rings
-  // of the child cell under the parent's centre.
-  const DggsParams child_p = p.withRes(p.res + 1);
-  requireHierSys(*getTransformer(child_p));
+  // The children live at res + 1, so build the system that deep.
+  auto t = getTransformer(p.withRes(p.res + 1));
+  const auto &sys = requireHierSys(*t);
+  const DgIDGGBase &dgg = t->idggs->idggBase(p.res);
+  DgResAdd<DgQ2DICoord> q2diR(q2diFromSeqNum(dgg.bndRF(), seqnum), p.res);
 
-  const GeoCoord centre = seqNumToGeo(p, seqnum);
-  const SeqNum centre_child =
-      geoToSeqNum(child_p, centre.lon_deg, centre.lat_deg);
+  DgLocVector children(sys);
+  sys.setNdxChildren(q2diR, children);
 
+  const DgHierNdxSystemRFBase &child_rf = sys.sysRF(p.res + 1);
+  const DgBoundedIDGG &child_bnd = t->idggs->idggBase(p.res + 1).bndRF();
   std::vector<SeqNum> result;
-  for (SeqNum c : seqNumKRing(child_p, centre_child, 2))
-    if (seqNumIndexParent(child_p, c) == seqnum)
-      result.push_back(c);
+  result.reserve(static_cast<std::size_t>(children.size()));
+  for (int i = 0; i < children.size(); i++) {
+    const DgHierNdx &ndx = sys.getAddress(children[i])->address();
+    result.push_back(static_cast<SeqNum>(
+        child_bnd.seqNumAddress(child_rf.invQuantify(ndx))));
+  }
+  std::sort(result.begin(), result.end());
   return result;
+}
+
+// ===========================================================================
+// INDEX STRINGS — the indexing system's own text form: two base-cell digits
+// followed by one digit per resolution.
+// ===========================================================================
+
+std::string seqNumToIndexString(const DggsParams &p, SeqNum seqnum) {
+  auto t = getTransformer(p);
+  const auto &rf = requireHierSys(*t).sysRF(p.res);
+  auto loc = t->inSEQNUM(seqnum);
+  rf.convert(loc.get());
+  DgHierNdx ndx = *rf.getAddress(*loc);
+  rf.setStringFromIntCoord(ndx);
+  return ndx.strNdx().valString();
+}
+
+SeqNum indexStringToSeqNum(const DggsParams &p, const std::string &ndx_str) {
+  auto t = getTransformer(p);
+  const auto &rf = requireHierSys(*t).sysRF(p.res);
+
+  // dglib exits the process on a malformed index, so check its shape first.
+  const auto invalid = [&](const std::string &why) {
+    return std::invalid_argument("invalid index string '" + ndx_str +
+                                 "' for resolution " + std::to_string(p.res) +
+                                 ": " + why);
+  };
+  if (ndx_str.size() != static_cast<std::size_t>(p.res) + 2)
+    throw invalid("expected " + std::to_string(p.res + 2) +
+                  " digits (2 base-cell digits plus one per resolution)");
+  for (char c : ndx_str)
+    if (!std::isdigit(static_cast<unsigned char>(c)))
+      throw invalid("only digits are allowed");
+  if (std::stoi(ndx_str.substr(0, 2)) > 11)
+    throw invalid("base cell must be 00-11");
+  const char max_digit = static_cast<char>('0' + p.aperture - 1);
+  for (std::size_t i = 2; i < ndx_str.size(); i++)
+    if (ndx_str[i] > max_digit)
+      throw invalid(std::string("digits must be 0-") + max_digit);
+
+  DgHierNdx ndx;
+  ndx.setStrNdx(DgHierNdxStringCoord(ndx_str));
+  rf.setIntFromStringCoord(ndx);
+  const DgQ2DICoord q2di = rf.invQuantify(ndx);
+  if (!t->bndRF->validAddress(q2di))
+    throw invalid("no such cell");
+  const auto seqnum = static_cast<SeqNum>(t->bndRF->seqNumAddress(q2di));
+  // Digit combinations that no cell uses (e.g. under a pentagon) still decode
+  // to some cell; only the one that encodes back to the input is valid.
+  if (seqNumToIndexString(p, seqnum) != ndx_str)
+    throw invalid("no such cell");
+  return seqnum;
 }
 
 // ===========================================================================
@@ -1225,7 +1399,7 @@ double seqNumCellAreaKM(const DggsParams &p, SeqNum seqnum) {
   const DgGeoCoord center = *t->geoRF->getAddress(*loc);
 
   // geoPolyArea is in steradians on the unit sphere.
-  const long double r = DgGeoSphRF::earthRadiusKM();
+  const long double r = t->geoRF->earthRadiusKM();
   return static_cast<double>(DgGeoCoord::geoPolyArea(poly, center) * r * r);
 }
 
@@ -1283,7 +1457,7 @@ static double ringAreaKM(const std::vector<GeoCoord> &ring) {
            (2.0 + std::sin(a.lat_deg * kDegToRad) +
             std::sin(b.lat_deg * kDegToRad));
   }
-  const double r = static_cast<double>(DgGeoSphRF::earthRadiusKM());
+  const double r = static_cast<double>(DEFAULT_RADIUS_KM);
   return sum * r * r / 2.0;
 }
 

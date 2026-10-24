@@ -994,13 +994,159 @@ SELECT round(geo_azimuth_deg('POINT(0 0)'::GEOMETRY, 'POINT(0 1)'::GEOMETRY), 6)
 0.0	90.0	180.0	270.0
 
 # ============================================================
+# DGGRID v9.1: projections, datum, presets, index strings
+# ============================================================
+
+# IVEA and GNOMONIC are accepted projections
+query II
+SELECT geo_to_seqnum('POINT(10 45)'::GEOMETRY, 5, dggs_params('IVEA', 4, 'HEXAGON', 0.0, 58.28252559, 11.25)),
+       geo_to_seqnum('POINT(10 45)'::GEOMETRY, 5, dggs_params('GNOMONIC', 4, 'HEXAGON', 0.0, 58.28252559, 11.25));
+----
+2206	2205
+
+# an unknown projection is an error, not a crash
+statement error
+SELECT geo_to_seqnum('POINT(0 0)'::GEOMETRY, 3, dggs_params('BOGUS', 4, 'HEXAGON', 0.0, 58.28252559, 11.25));
+----
+Unknown projection 'BOGUS'
+
+# the 6- and 8-argument dggs_params default the datum
+query II
+SELECT (dggs_params('ISEA', 4, 'HEXAGON', 0.0, 58.28252559, 11.25)).datum,
+       (dggs_params('ISEA', 3, 'HEXAGON', 0.0, 58.28252559, 11.25, true, '3437')).datum;
+----
+AUTHALIC_SPHERE	AUTHALIC_SPHERE
+
+query I
+SELECT (dggs_params('ISEA', 7, 'HEXAGON', 0.0, 58.28252559, 11.20, false, '', 'WGS84')).datum;
+----
+WGS84
+
+statement error
+SELECT geo_to_seqnum('POINT(0 0)'::GEOMETRY, 3, dggs_params('ISEA', 4, 'HEXAGON', 0.0, 58.28252559, 11.25, false, '', 'NAD27'));
+----
+Unknown datum 'NAD27'
+
+# the AUTHALIC_SPHERE datum is what the 6-argument form already does
+query I
+SELECT geo_to_seqnum('POINT(10 45)'::GEOMETRY, 9, dggs_params('ISEA', 4, 'HEXAGON', 0.0, 58.28252559, 11.25, false, '', 'AUTHALIC_SPHERE'))
+     = geo_to_seqnum('POINT(10 45)'::GEOMETRY, 9);
+----
+true
+
+# WGS84 input is geodetic: the same point lands in a different cell
+query II
+SELECT seqnum_to_geo(geo_to_seqnum('POINT(10 45)'::GEOMETRY, 9, dggs_preset('ISEA4HL')), 9, dggs_preset('ISEA4HL'))::VARCHAR,
+       seqnum_to_geo(geo_to_seqnum('POINT(10 45)'::GEOMETRY, 9, dggs_preset('ISEA4HS')), 9, dggs_preset('ISEA4HS'))::VARCHAR;
+----
+POINT (9.988763537741017 44.99201106375823)	POINT (9.935304674300593 44.98847624534072)
+
+# a WGS84 cell centre maps back to its own cell
+query I
+SELECT bool_and(geo_to_seqnum(seqnum_to_geo(s::UBIGINT, 5, dggs_preset('IGEO7v2')), 5, dggs_preset('IGEO7v2')) = s)
+FROM range(1, 1000) r(s);
+----
+true
+
+# presets
+query IIIIII
+SELECT p.projection, p.aperture, p.topology, p.pole_lon_deg, p.datum, round(p.pole_lat_deg, 9)
+FROM (SELECT dggs_preset('IGEO7v2') AS p);
+----
+ISEA	7	HEXAGON	11.2	WGS84	58.282525589
+
+query IIII
+SELECT p.projection, p.topology, round(p.azimuth_deg, 6), p.datum FROM (SELECT dggs_preset('fuller4dz') AS p);
+----
+FULLER	DIAMOND	125.687651	AUTHALIC_SPHERE
+
+query I
+SELECT dggs_preset('IGEO7') = dggs_preset('ISEA7HLZ') AND dggs_preset('IGEO7v1') = dggs_preset('isea7hs');
+----
+true
+
+statement error
+SELECT dggs_preset('ISEA5H');
+----
+Unknown preset 'ISEA5H'
+
+query I
+SELECT dggs_preset(NULL);
+----
+NULL
+
+# index strings: base cell plus one digit per resolution, prefix = parent
+query III
+SELECT seqnum_to_index_string(100::UBIGINT, 4, dggs_preset('ISEA7H')),
+       seqnum_to_index_string(100::UBIGINT, 4, dggs_preset('ISEA3H')),
+       seqnum_to_index_string(100::UBIGINT, 4);
+----
+010041	022120	010230
+
+query I
+SELECT bool_and(starts_with(seqnum_to_index_string(s::UBIGINT, 4, dggs_preset('ISEA7H')),
+                            seqnum_to_index_string(seqnum_index_parent(s::UBIGINT, 4, dggs_preset('ISEA7H')), 3, dggs_preset('ISEA7H'))))
+FROM range(1, 2000) r(s);
+----
+true
+
+# every cell round-trips, for each aperture
+query II
+SELECT a, count(*) FILTER (WHERE index_string_to_seqnum(seqnum_to_index_string(s::UBIGINT, 3, p), 3, p) <> s)
+FROM (VALUES (3), (4), (7)) v(a),
+     LATERAL (SELECT dggs_params('ISEA', a, 'HEXAGON', 0.0, 58.28252559, 11.25) AS p),
+     LATERAL range(1, dggs_n_cells(3, p)::BIGINT + 1) r(s)
+GROUP BY a ORDER BY a;
+----
+3	0
+4	0
+7	0
+
+# malformed strings are errors, not crashes
+statement error
+SELECT index_string_to_seqnum('01007', 4, dggs_preset('ISEA7H'));
+----
+expected 6 digits
+
+statement error
+SELECT index_string_to_seqnum('129999', 4, dggs_preset('ISEA7H'));
+----
+base cell must be 00-11
+
+statement error
+SELECT index_string_to_seqnum('010047', 4, dggs_preset('ISEA7H'));
+----
+digits must be 0-6
+
+# the pentagon's skipped digit names no cell
+statement error
+SELECT index_string_to_seqnum('002', 1, dggs_preset('ISEA7H'));
+----
+no such cell
+
+# index children partition the next resolution (DGGRID 9.1 fixed Z3/ZORDER)
+query IIII
+WITH g AS (SELECT a, dggs_params('ISEA', a, 'HEXAGON', 0.0, 58.28252559, 11.25) AS p FROM (VALUES (3), (4), (7)) v(a)),
+kids AS (SELECT a, p, s, unnest(seqnum_index_children(s::UBIGINT, 2, p)) AS c
+         FROM g, LATERAL range(1, dggs_n_cells(2, p)::BIGINT + 1) r(s))
+SELECT a, count(*) = dggs_n_cells(3, any_value(p)), count(DISTINCT c) = count(*),
+       bool_and(seqnum_index_parent(c, 3, p) = s)
+FROM kids GROUP BY a ORDER BY a;
+----
+3	true	true	true
+4	true	true	true
+7	true	true	true
+
+# ============================================================
 # polygon_to_seqnums
 # ============================================================
 
+# Cell 157's centre lies on the equator (lat ~1.4e-9 since DGGRID 9.1's exact
+# ISEA constants; it was ~-1.2e-9 before), so it falls just inside.
 query I
 SELECT polygon_to_seqnums('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))'::GEOMETRY, 3);
 ----
-[158]
+[157, 158]
 
 # every returned cell's centre is inside the polygon, and every cell whose
 # centre is inside is returned (rectangle with a hole, by brute force)
@@ -1034,7 +1180,7 @@ SELECT len(polygon_to_seqnums('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))'::GEOMETRY
        polygon_to_seqnums('POLYGON Z((0 0 1, 10 0 1, 10 10 1, 0 10 1, 0 0 1))'::GEOMETRY, 3),
        polygon_to_seqnums('POLYGON EMPTY'::GEOMETRY, 3);
 ----
-true	[158]	[]
+true	[157, 158]	[]
 
 statement error
 SELECT polygon_to_seqnums('POINT(0 0)'::GEOMETRY, 5);
@@ -1310,7 +1456,7 @@ CREATE OR REPLACE TABLE _dggs_functions AS
 SELECT function_name, function_type, parameters, description, examples, categories
 FROM duckdb_functions()
 WHERE function_name SIMILAR TO
-      '(duck_dggs_version|dggs_.*|geo_to_.*|seqnum_.*|q2di_.*|q2dd_.*|projtri_.*|zorder_to_seqnum|z3_to_seqnum|z7_to_seqnum|vertex2dd_to_seqnum|igeo7_.*)';
+      '(duck_dggs_version|dggs_.*|geo_to_.*|seqnum_.*|q2di_.*|q2dd_.*|projtri_.*|zorder_to_seqnum|z3_to_seqnum|z7_to_seqnum|vertex2dd_to_seqnum|index_string_to_seqnum|igeo7_.*)';
 
 # Guards against the list above silently matching nothing.
 query I
