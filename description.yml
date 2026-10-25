@@ -2,7 +2,7 @@ extension:
   name: duck_dggs
   description: DuckDB extension for discrete global grid systems (DGGS) powered by DGGRID v9.1.
   
-  version: 0.1.11 # x-release-please-version
+  version: 0.2.0 # x-release-please-version
   language: C++
   build: cmake
   license: MIT

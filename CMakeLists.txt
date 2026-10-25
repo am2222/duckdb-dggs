@@ -8,7 +8,7 @@ set(LOADABLE_EXTENSION_NAME ${TARGET_NAME}_loadable_extension)
 
 project(
   ${TARGET_NAME}
-  VERSION 0.1.11 # x-release-please-version
+  VERSION 0.2.0 # x-release-please-version
   LANGUAGES CXX C
   DESCRIPTION "DuckDB extension — DGGRID discrete global grid functions")
 
