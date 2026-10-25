@@ -42,6 +42,8 @@
 
 #include "dggrid_transform.hpp"
 
+#include "auth/authalic.hpp" // WGS84 geodetic <-> authalic latitude
+
 // ── dglib headers ──────────────────────────────────────────────────────
 #include <dglib/DgRFNetwork.h>
 #include <dglib/DgGeoSphRF.h>    // DgGeoSphRF, DgGeoSphDegRF
@@ -65,7 +67,6 @@
 #include <dglib/DgHierNdxIntRF.h> // DgHierNdxIntCoord (.value())
 #include <dglib/DgHierNdxSystemRFBase.h>  // per-resolution Z* index RF
 #include <dglib/DgHierNdxSystemRFSBase.h> // Z* system factory (makeSystem)
-#include <dglib/DgAuthalicConverter.h>    // DgAuthalic (WGS84 <-> authalic)
 
 #include <algorithm>
 #include <cctype>
@@ -114,16 +115,17 @@ static DgQ2DICoord q2diFromSeqNum(const DgBoundedIDGG &bnd, uint64_t seqnum) {
 // The grid lives on the WGS84 authalic sphere. With the WGS84 datum,
 // geographic coordinates are geodetic and only their latitude changes on the
 // way in and out (longitude is the same on both).
+//
+// This uses Karney's (2022) series rather than dglib's DgAuthalic: its inverse
+// iterates to long double precision and exits the process when that cannot be
+// reached, which is always the case on WASM (quad long double, double libm).
+// The two agree to within 3e-14 degrees.
 static double geodeticToAuthalicDeg(double lat_deg) {
-  return static_cast<double>(DgAuthalic::geodeticToAuthalicLatitude(
-                                 static_cast<long double>(lat_deg) * M_PI_180) *
-                             M_180_PI);
+  return auth::geodetic_to_authalic(lat_deg);
 }
 
 static double authalicToGeodeticDeg(double lat_deg) {
-  return static_cast<double>(DgAuthalic::authalicToGeodeticLatitude(
-                                 static_cast<long double>(lat_deg) * M_PI_180) *
-                             M_180_PI);
+  return auth::authalic_to_geodetic(lat_deg);
 }
 
 // ===========================================================================
