@@ -1091,9 +1091,9 @@ static void SeqNumToBoundaryEdgeFun(DataChunk &args, ExpressionState &,
     }
   } else {
     for (idx_t i = 0; i < n; i++)
-      WriteWKBPolygon(result, i,
-                      dggrid::seqNumToBoundary(paramsWithRes(res[i]),
-                                               seqnum[i], edge[i]));
+      WriteWKBPolygon(
+          result, i,
+          dggrid::seqNumToBoundary(paramsWithRes(res[i]), seqnum[i], edge[i]));
   }
 }
 
@@ -2079,15 +2079,16 @@ static void LoadInternal(ExtensionLoader &loader) {
   const auto RESINFO = ResInfoType();
   const auto LIST_UB = LogicalType::LIST(UB);
 
+  // Adds further overloads (and their descriptions) to a function's set.
+  using RegExtend =
+      std::function<void(ScalarFunctionSet &, vector<FunctionDescription> &)>;
+
   // Helper: register two overloads for a function (without and with params),
   // documenting both.
   auto reg = [&](const char *name, vector<LogicalType> base_args,
                  const LogicalType &ret, scalar_function_t base_fn,
                  scalar_function_t params_fn, const TransformDoc &doc,
-                 // Adds further overloads (and their descriptions) to the set.
-                 const std::function<void(ScalarFunctionSet &,
-                                          vector<FunctionDescription> &)>
-                     &extend = nullptr) {
+                 const RegExtend &extend = nullptr) {
     // Every transform can throw (bad resolution, unknown projection, ...).
     vector<string> ext_names = doc.parameter_names;
     ext_names.push_back("params");
@@ -2332,23 +2333,21 @@ static void LoadInternal(ExtensionLoader &loader) {
       "(DGGRID's insert_cell_bdry_edge_crossing); without them such an edge "
       "cuts the corner.";
   reg("seqnum_to_boundary", {UB, I}, GEO, SeqNumToBoundaryFun,
-      SeqNumToBoundaryParamsFun,
-      {SEQ_RES, SEQ_EX,
-       BOUNDARY_DESC, XFORM},
+      SeqNumToBoundaryParamsFun, {SEQ_RES, SEQ_EX, BOUNDARY_DESC, XFORM},
       [&](ScalarFunctionSet &set, vector<FunctionDescription> &descs) {
         const auto BO = LogicalType::BOOLEAN;
         const char *name = "seqnum_to_boundary";
         const vector<string> names = {"seqnum", "res", "edge_crossings"};
         const vector<string> pnames = {"seqnum", "res", "params",
                                        "edge_crossings"};
-        set.AddFunction(Fallible(WithParameterNames(
-            ScalarFunction(name, {UB, I, BO}, GEO,
-                           SeqNumToBoundaryEdgeFun<false>),
-            names)));
-        set.AddFunction(Fallible(WithParameterNames(
-            ScalarFunction(name, {UB, I, PARAMS, BO}, GEO,
-                           SeqNumToBoundaryEdgeFun<true>),
-            pnames)));
+        set.AddFunction(Fallible(
+            WithParameterNames(ScalarFunction(name, {UB, I, BO}, GEO,
+                                              SeqNumToBoundaryEdgeFun<false>),
+                               names)));
+        set.AddFunction(Fallible(
+            WithParameterNames(ScalarFunction(name, {UB, I, PARAMS, BO}, GEO,
+                                              SeqNumToBoundaryEdgeFun<true>),
+                               pnames)));
 
         FunctionDescription d;
         d.description = BOUNDARY_DESC;
