@@ -183,7 +183,11 @@ SeqNum seqNumToSeqNum(const DggsParams &p, SeqNum seqnum);
 // Returns the cell boundary vertices (in lon/lat degrees) for the given
 // sequence number.  The ring is open (first vertex is NOT repeated at the
 // end); the caller is responsible for closing it when writing WKB.
-std::vector<GeoCoord> seqNumToBoundary(const DggsParams &p, SeqNum seqnum);
+// If edgeCrossings is true the ring also has the points where its edges cross
+// onto another icosahedron face and bend there; without them such an edge
+// cuts the corner.
+std::vector<GeoCoord> seqNumToBoundary(const DggsParams &p, SeqNum seqnum,
+                                       bool edgeCrossings = false);
 
 // ===========================================================================
 // Neighbors

@@ -29,11 +29,21 @@ SELECT seqnum_to_geo(2380, 5);
 ```sql
 GEOMETRY seqnum_to_boundary (seqnum UBIGINT, res INTEGER)
 GEOMETRY seqnum_to_boundary (seqnum UBIGINT, res INTEGER, params STRUCT)
+GEOMETRY seqnum_to_boundary (seqnum UBIGINT, res INTEGER, edge_crossings BOOLEAN)
+GEOMETRY seqnum_to_boundary (seqnum UBIGINT, res INTEGER, params STRUCT, edge_crossings BOOLEAN)
 ```
 
 ### Description
 
 Returns the cell boundary as a `GEOMETRY` POLYGON. The exterior ring is closed (first vertex repeated). For hexagon grids, the ring contains 7 points.
+
+With `edge_crossings = true` the ring also includes the points where a cell
+edge crosses onto another icosahedron face. A cell edge is straight on one
+face but bends where it crosses a face edge, so without these points the
+boundary cuts the corner (this is DGGRID's `insert_cell_bdry_edge_crossing`).
+Cells inside a single face are unchanged. For example, cell 2380 at
+resolution 5 straddles the equator, a face edge in the default ISEA
+orientation, so it gets 2 extra points (9 instead of 7).
 
 Requires the `spatial` extension for display.
 

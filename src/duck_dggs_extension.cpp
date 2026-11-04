@@ -10,6 +10,7 @@
 #include "igeo7_functions.hpp"
 #include <dglib/DgBase.h>
 #include <duckdb/parser/parsed_data/create_scalar_function_info.hpp>
+#include <functional>
 
 namespace duckdb {
 
@@ -1071,6 +1072,30 @@ static void SeqNumToBoundaryParamsFun(DataChunk &args, ExpressionState &,
     WriteWKBPolygon(result, i, dggrid::seqNumToBoundary(p, seqnum[i]));
   }
 }
+// seqnum_to_boundary(seqnum, res, edge_crossings) and
+// seqnum_to_boundary(seqnum, res, params, edge_crossings).
+template <bool WITH_PARAMS>
+static void SeqNumToBoundaryEdgeFun(DataChunk &args, ExpressionState &,
+                                    Vector &result) {
+  idx_t n = args.size();
+  ArgReader<uint64_t> seqnum(args, 0, n);
+  ArgReader<int32_t> res(args, 1, n);
+  ArgReader<bool> edge(args, WITH_PARAMS ? 3 : 2, n);
+  if (WITH_PARAMS) {
+    ParamsReader params(args.data[2], n);
+    for (idx_t i = 0; i < n; i++) {
+      auto p = params[i];
+      p.res = res[i];
+      WriteWKBPolygon(result, i,
+                      dggrid::seqNumToBoundary(p, seqnum[i], edge[i]));
+    }
+  } else {
+    for (idx_t i = 0; i < n; i++)
+      WriteWKBPolygon(result, i,
+                      dggrid::seqNumToBoundary(paramsWithRes(res[i]),
+                                               seqnum[i], edge[i]));
+  }
+}
 
 static void SeqNumToSeqNumFun(DataChunk &args, ExpressionState &,
                               Vector &result) {
@@ -2058,7 +2083,11 @@ static void LoadInternal(ExtensionLoader &loader) {
   // documenting both.
   auto reg = [&](const char *name, vector<LogicalType> base_args,
                  const LogicalType &ret, scalar_function_t base_fn,
-                 scalar_function_t params_fn, const TransformDoc &doc) {
+                 scalar_function_t params_fn, const TransformDoc &doc,
+                 // Adds further overloads (and their descriptions) to the set.
+                 const std::function<void(ScalarFunctionSet &,
+                                          vector<FunctionDescription> &)>
+                     &extend = nullptr) {
     // Every transform can throw (bad resolution, unknown projection, ...).
     vector<string> ext_names = doc.parameter_names;
     ext_names.push_back("params");
@@ -2071,6 +2100,9 @@ static void LoadInternal(ExtensionLoader &loader) {
     ext_args.push_back(PARAMS);
     set.AddFunction(Fallible(WithParameterNames(
         ScalarFunction(name, ext_args, ret, std::move(params_fn)), ext_names)));
+    vector<FunctionDescription> extra_descs;
+    if (extend)
+      extend(set, extra_descs);
 
     CreateScalarFunctionInfo info(std::move(set));
     // What the bare RegisterFunction(ScalarFunctionSet) overload does
@@ -2096,6 +2128,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 
     info.descriptions.push_back(std::move(base_desc));
     info.descriptions.push_back(std::move(params_desc));
+    for (auto &d : extra_descs)
+      info.descriptions.push_back(std::move(d));
     loader.RegisterFunction(std::move(info));
   };
 
@@ -2290,12 +2324,46 @@ static void LoadInternal(ExtensionLoader &loader) {
        "Re-encodes a sequential cell index through a full round-trip via the "
        "DGGS engine, which validates and normalises it.",
        XFORM});
+  const char *const BOUNDARY_DESC =
+      "Returns the boundary of the DGGS cell with the given sequential index "
+      "as a closed POLYGON; requires the spatial extension. If the optional "
+      "last argument edge_crossings is true, the ring also has the points "
+      "where an edge crosses onto another icosahedron face and bends there "
+      "(DGGRID's insert_cell_bdry_edge_crossing); without them such an edge "
+      "cuts the corner.";
   reg("seqnum_to_boundary", {UB, I}, GEO, SeqNumToBoundaryFun,
       SeqNumToBoundaryParamsFun,
       {SEQ_RES, SEQ_EX,
-       "Returns the boundary of the DGGS cell with the given sequential index "
-       "as a closed POLYGON; requires the spatial extension.",
-       XFORM});
+       BOUNDARY_DESC, XFORM},
+      [&](ScalarFunctionSet &set, vector<FunctionDescription> &descs) {
+        const auto BO = LogicalType::BOOLEAN;
+        const char *name = "seqnum_to_boundary";
+        const vector<string> names = {"seqnum", "res", "edge_crossings"};
+        const vector<string> pnames = {"seqnum", "res", "params",
+                                       "edge_crossings"};
+        set.AddFunction(Fallible(WithParameterNames(
+            ScalarFunction(name, {UB, I, BO}, GEO,
+                           SeqNumToBoundaryEdgeFun<false>),
+            names)));
+        set.AddFunction(Fallible(WithParameterNames(
+            ScalarFunction(name, {UB, I, PARAMS, BO}, GEO,
+                           SeqNumToBoundaryEdgeFun<true>),
+            pnames)));
+
+        FunctionDescription d;
+        d.description = BOUNDARY_DESC;
+        d.categories = XFORM;
+        d.parameter_types = {UB, I, BO};
+        d.parameter_names = names;
+        d.examples = {"seqnum_to_boundary(2380::UBIGINT, 5, true)"};
+        FunctionDescription pd = d;
+        pd.parameter_types = {UB, I, PARAMS, BO};
+        pd.parameter_names = pnames;
+        pd.examples = {"seqnum_to_boundary(2380::UBIGINT, 5, " +
+                       string(ISEA4H) + ", true)"};
+        descs.push_back(std::move(d));
+        descs.push_back(std::move(pd));
+      });
 
   // ── GRID STATISTICS ───────────────────────────────────────────────────────
   reg("dggs_res_info", {I}, RESINFO, DggsResInfoFun, DggsResInfoParamsFun,

@@ -1,7 +1,7 @@
 <div align="center">
   <img src="duck_dggs_icon.svg" width="240" alt="duck_dggs"/>
   <h1>duck_dggs</h1>
-  <p>A DuckDB extension for discrete global grid systems (DGGS) powered by <a href="https://github.com/sahrk/DGGRID">DGGRID v9.1</a>.<br/>
+  <p>A DuckDB extension for discrete global grid systems (DGGS) powered by <a href="https://github.com/sahrk/DGGRID">DGGRID v9.15</a>.<br/>
   Transforms geographic coordinates to and from DGGS cell identifiers across multiple coordinate reference frames.</p>
   <p><strong><a href="https://am2222.github.io/duckdb-dggs/">Documentation</a> · <a href="CHANGELOG.md">Changelog</a></strong></p>
   <p>
@@ -10,7 +10,7 @@
     <a href="test/sql"><img src="https://img.shields.io/badge/SQL%20tests-176-brightgreen?style=flat" alt="SQL tests: 176"/></a>
     <a href="https://github.com/am2222/duckdb-dggs/releases"><img src="https://img.shields.io/github/v/release/am2222/duckdb-dggs?style=flat&label=release" alt="Release"/></a>
     <a href="https://github.com/duckdb/duckdb"><img src="https://img.shields.io/badge/DuckDB-v2.0-FFF000?style=flat" alt="DuckDB v2.0"/></a>
-    <a href="https://github.com/sahrk/DGGRID"><img src="https://img.shields.io/badge/DGGRID-v9.1-blue?style=flat" alt="DGGRID v9.1"/></a>
+    <a href="https://github.com/sahrk/DGGRID"><img src="https://img.shields.io/badge/DGGRID-v9.15-blue?style=flat" alt="DGGRID v9.15"/></a>
     <a href="LICENSE"><img src="https://img.shields.io/github/license/am2222/duckdb-dggs?style=flat" alt="License"/></a>
   </p>
 </div>
@@ -228,7 +228,7 @@ STRUCT dggs_preset (name VARCHAR)
 
 #### Description
 
-Returns the `dggs_params` struct of one of DGGRID v9.1's named grids:
+Returns the `dggs_params` struct of one of DGGRID v9.15's named grids:
 `IGEO7v1` (ISEA7H on the authalic sphere), `IGEO7v2` / `IGEO7` (ISEA7H with
 WGS84 lon/lat), or `<ISEA|IVEA|FULLER><3H|4H|7H|4T|4D>` with an optional `S`
 (authalic sphere) or `L` (WGS84) suffix. Case-insensitive; a trailing `Z` is
@@ -567,6 +567,8 @@ SELECT seqnum_to_geo(2380, 5, dggs_params('ISEA', 4, 'HEXAGON', 0.0, 58.28252559
 ```sql
 GEOMETRY seqnum_to_boundary (seqnum UBIGINT, res INTEGER)
 GEOMETRY seqnum_to_boundary (seqnum UBIGINT, res INTEGER, params STRUCT)
+GEOMETRY seqnum_to_boundary (seqnum UBIGINT, res INTEGER, edge_crossings BOOLEAN)
+GEOMETRY seqnum_to_boundary (seqnum UBIGINT, res INTEGER, params STRUCT, edge_crossings BOOLEAN)
 ```
 
 #### Description
@@ -579,6 +581,14 @@ is required by the WKB/WKT standard.
 For ISEA4H hexagon cells the ring contains **7 points** (6 distinct vertices +
 1 closing repeat). The cell centre (from `seqnum_to_geo`) is guaranteed to lie
 inside the returned polygon.
+
+With `edge_crossings = true` the ring also includes the points where a cell
+edge crosses onto another icosahedron face. A cell edge is straight on one
+face but bends where it crosses a face edge, so without these points the
+boundary cuts the corner (this is DGGRID's `insert_cell_bdry_edge_crossing`).
+Cells inside a single face are unchanged. For example, cell 2380 at
+resolution 5 straddles the equator, a face edge in the default ISEA
+orientation, so it gets 2 extra points (9 instead of 7).
 
 Requires the `spatial` extension (`LOAD spatial;`).
 
@@ -594,6 +604,10 @@ SELECT seqnum_to_boundary(2380, 5);
 ├────────────────────────────────────────────────────────────────────────────────────────────────────┤
 │ POLYGON ((-0.451 0.781, 0.451 0.781, 0.902 0.0, 0.451 -0.781, -0.451 -0.781, -0.902 0.0, -0.451 0.781)) │
 └────────────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+```sql
+SELECT seqnum_to_boundary(2380, 5, true);  -- with face-edge crossings
 ```
 
 With explicit grid parameters:

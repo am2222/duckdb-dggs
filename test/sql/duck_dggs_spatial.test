@@ -127,3 +127,58 @@ query I
 SELECT geo_to_seqnum(seqnum_to_geo(2380, 5), 5);
 ----
 2380
+
+# ============================================================
+# seqnum_to_boundary(..., edge_crossings) — DGGRID 9.15
+# insert_cell_bdry_edge_crossing
+#
+# Cell 2380 straddles the equator, which is an icosahedron face
+# edge in the default ISEA orientation, so its two equator
+# crossings are added: 6 vertices + 2 crossings + closing repeat.
+# ============================================================
+
+query I
+SELECT ST_NPoints(seqnum_to_boundary(2380, 5, true));
+----
+9
+
+query I
+SELECT ST_NPoints(seqnum_to_boundary(2380, 5,
+    dggs_params('ISEA', 4, 'HEXAGON', 0.0, 58.28252559, 11.25), true));
+----
+9
+
+# the inserted points lie on the equator
+query I
+WITH r AS (SELECT ST_ExteriorRing(seqnum_to_boundary(2380, 5, true)) g)
+SELECT abs(ST_Y(ST_PointN(g, 4))) < 1e-6 AND abs(ST_Y(ST_PointN(g, 8))) < 1e-6 FROM r;
+----
+true
+
+# false is the same as leaving the argument out
+query I
+SELECT ST_Equals(seqnum_to_boundary(2380, 5, false), seqnum_to_boundary(2380, 5));
+----
+true
+
+# a cell inside one face is unchanged
+query I
+SELECT ST_Equals(seqnum_to_boundary(2381, 5, true), seqnum_to_boundary(2381, 5));
+----
+true
+
+# every res-5 cell that does not wrap the antimeridian or a pole keeps all its
+# vertices, stays valid and still contains its centre; some gain crossings
+query IIII
+WITH t AS (
+  SELECT seqnum_to_boundary(s::UBIGINT, 5) b0,
+         seqnum_to_boundary(s::UBIGINT, 5, true) b1,
+         seqnum_to_geo(s::UBIGINT, 5) c
+  FROM range(1, 10243) t(s))
+SELECT bool_and(ST_NPoints(b1) >= ST_NPoints(b0)),
+       bool_and(ST_IsValid(b1)),
+       bool_and(ST_Contains(b1, c)),
+       count(*) FILTER (ST_NPoints(b1) > ST_NPoints(b0)) > 0
+FROM t WHERE ST_XMax(b0) - ST_XMin(b0) < 180;
+----
+true	true	true	true
