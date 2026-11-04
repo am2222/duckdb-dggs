@@ -1,7 +1,7 @@
 <div align="center">
   <img src="duck_dggs_icon.svg" width="240" alt="duck_dggs"/>
   <h1>duck_dggs</h1>
-  <p>A DuckDB extension for discrete global grid systems (DGGS) powered by <a href="https://github.com/sahrk/DGGRID">DGGRID v9.15</a>.<br/>
+  <p>A DuckDB extension for discrete global grid systems (DGGS) powered by <a href="https://github.com/sahrk/DGGRID">DGGRID v9.15.1</a>.<br/>
   Transforms geographic coordinates to and from DGGS cell identifiers across multiple coordinate reference frames.</p>
   <p><strong><a href="https://am2222.github.io/duckdb-dggs/">Documentation</a> · <a href="CHANGELOG.md">Changelog</a></strong></p>
   <p>
@@ -10,7 +10,7 @@
     <a href="test/sql"><img src="https://img.shields.io/badge/SQL%20tests-176-brightgreen?style=flat" alt="SQL tests: 176"/></a>
     <a href="https://github.com/am2222/duckdb-dggs/releases"><img src="https://img.shields.io/github/v/release/am2222/duckdb-dggs?style=flat&label=release" alt="Release"/></a>
     <a href="https://github.com/duckdb/duckdb"><img src="https://img.shields.io/badge/DuckDB-v2.0-FFF000?style=flat" alt="DuckDB v2.0"/></a>
-    <a href="https://github.com/sahrk/DGGRID"><img src="https://img.shields.io/badge/DGGRID-v9.15-blue?style=flat" alt="DGGRID v9.15"/></a>
+    <a href="https://github.com/sahrk/DGGRID"><img src="https://img.shields.io/badge/DGGRID-v9.15.1-blue?style=flat" alt="DGGRID v9.15.1"/></a>
     <a href="LICENSE"><img src="https://img.shields.io/github/license/am2222/duckdb-dggs?style=flat" alt="License"/></a>
   </p>
 </div>
@@ -228,7 +228,7 @@ STRUCT dggs_preset (name VARCHAR)
 
 #### Description
 
-Returns the `dggs_params` struct of one of DGGRID v9.15's named grids:
+Returns the `dggs_params` struct of one of DGGRID v9.15.1's named grids:
 `IGEO7v1` (ISEA7H on the authalic sphere), `IGEO7v2` / `IGEO7` (ISEA7H with
 WGS84 lon/lat), or `<ISEA|IVEA|FULLER><3H|4H|7H|4T|4D>` with an optional `S`
 (authalic sphere) or `L` (WGS84) suffix. Case-insensitive; a trailing `Z` is
