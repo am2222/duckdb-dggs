@@ -171,6 +171,12 @@ struct Transformer {
   LocPtr inGEO(double lon_deg, double lat_deg) const {
     if (wgs84)
       lat_deg = geodeticToAuthalicDeg(lat_deg);
+    // A pole has no longitude, but dglib still uses it, and in the standard
+    // ISEA orientation the poles lie on cell edges, so the cell found for
+    // (lon, +-90) varied with lon (the north pole in DGGRID 9.1, the south
+    // pole in 9.15). Use one longitude so a pole always gets the same cell.
+    if (std::fabs(lat_deg) >= 90.0)
+      lon_deg = 0.0;
     // DgGeoCoord(lon, lat, false) — third arg false = values are in degrees
     DgGeoCoord geo(static_cast<long double>(lon_deg),
                    static_cast<long double>(lat_deg), false);
@@ -234,10 +240,78 @@ struct Transformer {
     out_y = static_cast<double>(c->coord().y());
   }
 
+  // Quantises loc into the Q2DI frame (dgg), i.e. finds its cell.
+  //
+  // dglib's Q2DD->Q2DI step (DgQ2DDtoIConverter) moves a point that lies on
+  // or just over a quad's edge into the neighbouring quad with formulas made
+  // for the hexagon (and diamond) lattice. Triangle and diamond grids hit
+  // three bugs there:
+  //  - triangle grids: a point on a quad's far edge a == 1 (the south pole
+  //    in the default orientation, for one) can land in a cell far away, or
+  //    at resolution 0 out of range, which is a dglib Fatal;
+  //  - triangle and diamond grids: a point at or within ~1e-4 degrees of the
+  //    north/south icosahedron vertex gets the hexagon-only "lone vertex"
+  //    cell (quad 0 or 11), which is seqnum 1 (a different cell) or n+1 (no
+  //    cell at all).
+  // The continuous Q2DD position is right, so in those cases quantise a copy
+  // moved a hair (1e-11 quad units, a small fraction of a cell at any
+  // resolution) inside the quad: that is the quad's own cell at that edge or
+  // corner, which contains the point.
+  void toQ2DI(LocPtr &loc) const {
+    const DgGridTopology topo = dgg->gridTopo();
+    if (topo == Hexagon) {
+      dgg->convert(loc.get());
+      return;
+    }
+    if (&loc->rf() == dgg) {
+      // Already a cell address (Q2DI input): nothing continuous to fall back
+      // on, so reject the hexagon-only quads.
+      const int q = dgg->getAddress(*loc)->quadNum();
+      if (q == 0 || q == 11)
+        throw std::invalid_argument(
+            "quad " + std::to_string(q) +
+            " has no cells in a triangle or diamond grid (use quads 1-10)");
+      return;
+    }
+
+    q2ddRF->convert(loc.get());
+    const DgQ2DDCoord dd = *q2ddRF->getAddress(*loc);
+    // Quad coordinates: b = y / sin 60, a = x + b / 2, the quad is
+    // 0 <= a, b <= 1 (see DgIDGGBase::insertEdgeCrossings).
+    const long double b = dd.coord().y() / M_SIN60;
+    const long double a = dd.coord().x() + b / 2.0L;
+    const long double tol = 1.0e-11L;
+    const auto onFarEdge = [&](long double c) {
+      return c > 1.0L - tol && c < 1.0L + 1.0e-9L;
+    };
+
+    if (!(topo == Triangle && (onFarEdge(a) || onFarEdge(b)))) {
+      try {
+        dgg->convert(loc.get());
+        const int quad = dgg->getAddress(*loc)->quadNum();
+        if (quad != 0 && quad != 11)
+          return;
+      } catch (const std::runtime_error &) {
+        // a dglib Fatal (see CMakeLists.txt): retry from inside the quad
+      }
+    }
+
+    const long double a2 = std::min(std::max(a, tol), 1.0L - tol);
+    const long double b2 = std::min(std::max(b, tol), 1.0L - tol);
+    DgQ2DDCoord inside(dd.quadNum(), DgDVec2D(a2 - b2 / 2.0L, b2 * M_SIN60));
+    loc.reset(q2ddRF->makeLocation(inside));
+    dgg->convert(loc.get());
+    const int q = dgg->getAddress(*loc)->quadNum();
+    if (q == 0 || q == 11)
+      throw std::runtime_error(
+          "no cell found for a point at an icosahedron vertex in this "
+          "triangle or diamond grid (DGGRID lone-vertex quad " +
+          std::to_string(q) + ")");
+  }
+
   void outQ2DI(LocPtr &loc, uint64_t &out_quad, int64_t &out_i,
                int64_t &out_j) const {
-    // dgg IS the Q2DI RF — convert into it, then getAddress
-    dgg->convert(loc.get());
+    toQ2DI(loc);
     const DgQ2DICoord *c = dgg->getAddress(*loc);
     out_quad = static_cast<uint64_t>(c->quadNum());
     out_i = static_cast<int64_t>(c->coord().i());
@@ -246,7 +320,7 @@ struct Transformer {
 
   void outSEQNUM(LocPtr &loc, uint64_t &out_seqnum) const {
     // convert to Q2DI frame (dgg), extract Q2DICoord, then linearise
-    dgg->convert(loc.get());
+    toQ2DI(loc);
     const DgQ2DICoord *c = dgg->getAddress(*loc);
     out_seqnum = static_cast<uint64_t>(bndRF->seqNumAddress(*c));
   }
@@ -1037,7 +1111,8 @@ SeqNum seqNumToSeqNum(const DggsParams &p, SeqNum seqnum) {
   return r;
 }
 
-std::vector<GeoCoord> seqNumToBoundary(const DggsParams &p, SeqNum seqnum) {
+std::vector<GeoCoord> seqNumToBoundary(const DggsParams &p, SeqNum seqnum,
+                                       bool edgeCrossings) {
   auto t = getTransformer(p);
 
   // Resolve Q2DI from the sequence number.
@@ -1045,8 +1120,11 @@ std::vector<GeoCoord> seqNumToBoundary(const DggsParams &p, SeqNum seqnum) {
 
   // setAddVertices fills the polygon with boundary vertices already converted
   // to the reference frame the DgPolygon was constructed with (geoRF here).
+  // With edgeCrossings it also inserts the points where an edge crosses an
+  // icosahedron face edge and bends there (DGGRID's
+  // insert_cell_bdry_edge_crossing).
   DgPolygon poly(*t->geoRF);
-  t->dgg->setAddVertices(q2di, poly, 0 /* densify */);
+  t->dgg->setAddVertices(q2di, poly, 0 /* densify */, edgeCrossings);
 
   std::vector<GeoCoord> result;
   result.reserve(static_cast<std::size_t>(poly.size()));

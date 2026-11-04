@@ -45,6 +45,45 @@ endif()
 
 add_subdirectory("${DGGRID_DIR}" "third_party/DGGRID" EXCLUDE_FROM_ALL)
 
+# dglib's report(..., DgBase::Fatal) prints to stderr and calls exit(1), which
+# kills the whole DuckDB process (CLI, Python kernel, server) on any input dglib
+# cannot handle. Build dglib from a copy of DgBase.cpp in which Fatal throws
+# instead, so the error surfaces as an ordinary query error. Every Fatal goes
+# through this one function, so this covers the whole library.
+set(DGBASE_SRC "${DGGRID_DIR}/src/lib/dglib/lib/DgBase.cpp")
+set(DGBASE_PATCHED "${CMAKE_CURRENT_BINARY_DIR}/dglib_patched/DgBase.cpp")
+file(READ "${DGBASE_SRC}" _dgbase)
+set(_fatal_old
+    "         dgcerr << \"FATAL ERROR: \" << message << std::endl;\n#ifndef DGGRIDR\n         exit(1);\n#endif"
+)
+set(_fatal_new "         throw std::runtime_error(\"DGGRID: \" + message);")
+string(FIND "${_dgbase}" "${_fatal_old}" _fatal_pos)
+if(_fatal_pos EQUAL -1)
+  message(
+    FATAL_ERROR
+      "DgBase.cpp no longer has the expected Fatal/exit(1) code; update the "
+      "patch in CMakeLists.txt (it keeps dglib errors from exiting DuckDB).")
+endif()
+string(REPLACE "${_fatal_old}" "${_fatal_new}" _dgbase "${_dgbase}")
+# Written via a temporary file so the copy (and dglib) only rebuilds when the
+# content changes.
+file(
+  WRITE "${DGBASE_PATCHED}.tmp"
+  "// Generated from ${DGBASE_SRC} by duck_dggs's CMakeLists.txt\n#include <stdexcept>\n${_dgbase}"
+)
+configure_file("${DGBASE_PATCHED}.tmp" "${DGBASE_PATCHED}" COPYONLY)
+set_property(
+  DIRECTORY
+  APPEND
+  PROPERTY CMAKE_CONFIGURE_DEPENDS "${DGBASE_SRC}")
+get_target_property(_dglib_srcs dglib SOURCES)
+list(TRANSFORM _dglib_srcs REPLACE "^(.*/)?lib/DgBase\\.cpp$"
+                                   "${DGBASE_PATCHED}")
+if(NOT "${DGBASE_PATCHED}" IN_LIST _dglib_srcs)
+  message(FATAL_ERROR "could not find lib/DgBase.cpp in the dglib sources")
+endif()
+set_target_properties(dglib PROPERTIES SOURCES "${_dglib_srcs}")
+
 set(DGLIB_INCLUDE_DIR "${DGGRID_DIR}/src/lib/dglib/include")
 
 # --------------------------------------------------------------------------

@@ -858,6 +858,11 @@ SELECT seqnum_to_boundary(643::UBIGINT, 3);
 out of range 1–642
 
 statement error
+SELECT seqnum_to_boundary(643::UBIGINT, 3, true);
+----
+out of range 1–642
+
+statement error
 SELECT seqnum_children(999999::UBIGINT, 3);
 ----
 out of range
@@ -1479,3 +1484,116 @@ WHERE description IS NULL OR len(examples) = 0 OR len(categories) = 0
    OR len(list_filter(parameters, lambda x: x LIKE 'col%')) > 0;
 ----
 0
+
+# ============================================================
+# Poles: the longitude of a pole point is ignored
+#
+# In the default ISEA orientation the poles lie on cell edges, so dglib's
+# cell for (lon, +-90) depended on lon (the north pole in DGGRID 9.1, the
+# south pole in 9.15). geo_to_* now treats every pole point as lon 0.
+# ============================================================
+
+query I
+SELECT max(n) FROM (
+  SELECT count(DISTINCT geo_to_seqnum(('POINT(' || x || ' ' || y || ')')::GEOMETRY, r, dggs_preset(g))) n
+  FROM range(-180, 181, 15) a(x), (VALUES (-90), (90)) b(y), (VALUES (0), (3), (7)) c(r),
+       (VALUES ('ISEA4H'), ('ISEA3H'), ('ISEA7H'), ('ISEA4D'), ('ISEA4T'), ('IGEO7')) d(g)
+  GROUP BY g, y, r);
+----
+1
+
+# ============================================================
+# dglib Fatal errors are query errors, not process exits
+#
+# dglib's report(Fatal) calls exit(1); duck_dggs builds it with a patched
+# DgBase.cpp that throws instead (see CMakeLists.txt). A Q2DD point far
+# outside its quad used to kill the process.
+# ============================================================
+
+statement error
+SELECT q2dd_to_q2di(3, 5.0, 5.0, 3);
+----
+DGGRID: DgQ2DDtoIConverter::convertTypedAddress(): coordinate out of range
+
+# the connection is still usable afterwards
+query I
+SELECT q2dd_to_q2di(3, 0.15625, 0.27063, 5).quad;
+----
+3
+
+# ============================================================
+# Triangle / diamond grids at quad edges and icosahedron vertices
+#
+# dglib's Q2DD->Q2DI step moves points on a quad edge into the next quad
+# with hexagon-lattice formulas (see toQ2DI in dggrid_transform.cpp):
+#  - ISEA4T: a point on a quad's far edge (the south pole, for one) got a
+#    far-away cell, or at res 0 a dglib Fatal that exited the process;
+#  - ISEA4T / ISEA4D: points at the north/south icosahedron vertex got the
+#    hexagon-only "lone vertex" quad 0/11: seqnum 1 (a cell up to 128
+#    spacings away) or n+1 (no cell at all).
+# Each point must now get an existing cell whose centre is within one
+# centre spacing of it.
+# ============================================================
+
+# (the pole lies on the edge between two cells, so which one it gets depends
+# on floating-point rounding: check it is a real cell, not a fixed number)
+query I
+SELECT geo_to_seqnum('POINT(0 -90)'::GEOMETRY, 0, dggs_preset('ISEA4T')) BETWEEN 1 AND 20;
+----
+true
+
+query I
+WITH t AS (
+  SELECT g, r, p, geo_to_seqnum(p::GEOMETRY, r, dggs_preset(g)) sn
+  FROM (VALUES ('ISEA4T'), ('ISEA4D')) a(g), (VALUES (0), (3), (10), (25)) b(r),
+       (VALUES ('POINT(11.25 58.28252559)'), ('POINT(-168.75 -58.28252559)'),
+               ('POINT(-168.75 -58.2825256)'), ('POINT(0 -90)'), ('POINT(0 90)')) c(p))
+SELECT bool_and(sn BETWEEN 1 AND dggs_n_cells(r, dggs_preset(g))
+                AND geo_distance_km(p::GEOMETRY, seqnum_to_geo(sn, r, dggs_preset(g)))
+                    < dggs_cell_dist_km(r, dggs_preset(g)))
+FROM t;
+----
+true
+
+# not the cells dglib alone gives (1, ~90 degrees away, and 1281 = n + 1).
+# Five cells meet at a vertex and any of them is right; which one depends on
+# floating-point rounding (x86-64 long double is 80-bit, arm64 64-bit), so
+# the exact numbers are not checked.
+query II
+SELECT geo_to_seqnum('POINT(11.25 58.28252559)'::GEOMETRY, 3, dggs_preset('ISEA4T')) <> 1,
+       geo_to_seqnum('POINT(-168.75 -58.28252559)'::GEOMETRY, 3, dggs_preset('ISEA4T')) <> 1281;
+----
+true	true
+
+# points exactly on a quad's far edges (a = 1 and b = 1) land in a cell
+# touching that edge, i.e. next to the cell of a point just inside it
+query I
+WITH e AS (
+  SELECT g, r, quad,
+         CASE edge WHEN 'a' THEN 1.0 - t / 2 ELSE t - 0.5 END x,
+         CASE edge WHEN 'a' THEN t * sin(radians(60)) ELSE sin(radians(60)) END y
+  FROM (VALUES ('ISEA4T'), ('ISEA4D')) a(g), (VALUES (0), (2), (5), (20)) b(r),
+       range(1, 11) q(quad), (VALUES ('a'), ('b')) c(edge),
+       (SELECT (i + 0.37) / 10 t FROM range(10) s(i)) d),
+s AS (
+  SELECT g, r,
+         q2dd_to_seqnum(quad::UBIGINT, x, y, r, dggs_preset(g)) on_edge,
+         q2dd_to_seqnum(quad::UBIGINT, x - 1e-9 * (x - 0.25), y - 1e-9 * (y - 0.4330127), r, dggs_preset(g)) inside
+  FROM e)
+SELECT bool_and(geo_distance_km(seqnum_to_geo(on_edge, r, dggs_preset(g)),
+                                seqnum_to_geo(inside, r, dggs_preset(g)))
+                <= 1.5 * dggs_cell_dist_km(r, dggs_preset(g)))
+FROM s;
+----
+true
+
+# quads 0 and 11 have no cells in triangle and diamond grids
+statement error
+SELECT q2di_to_seqnum(11, 0, 0, 3, dggs_preset('ISEA4T'));
+----
+quad 11 has no cells in a triangle or diamond grid
+
+statement error
+SELECT q2di_to_seqnum(0, 0, 0, 3, dggs_preset('ISEA4D'));
+----
+quad 0 has no cells in a triangle or diamond grid
