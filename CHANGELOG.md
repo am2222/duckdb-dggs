@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.2.1](https://github.com/am2222/duckdb-dggs/compare/v0.2.0...v0.2.1) (2026-11-04)
+
+
+### Features
+
+* add an edge_crossings option to seqnum_to_boundary ([522604e](https://github.com/am2222/duckdb-dggs/commit/522604e1d4a5d70df54d37b892041ebab1919fae))
+* add an edge_crossings option to seqnum_to_boundary ([6ebf638](https://github.com/am2222/duckdb-dggs/commit/6ebf6381f3725b73f76b6f58e835334141042f99))
+* add an edge_crossings option to seqnum_to_boundary ([d260fc7](https://github.com/am2222/duckdb-dggs/commit/d260fc7e8123a4d29bf839ccd0adeb35ed25664d))
+* **dggrid:** upgrade to DGGRID v9.15 ([522604e](https://github.com/am2222/duckdb-dggs/commit/522604e1d4a5d70df54d37b892041ebab1919fae))
+* **dggrid:** upgrade to DGGRID v9.15 ([6ebf638](https://github.com/am2222/duckdb-dggs/commit/6ebf6381f3725b73f76b6f58e835334141042f99))
+* **dggrid:** upgrade to DGGRID v9.15 ([d260fc7](https://github.com/am2222/duckdb-dggs/commit/d260fc7e8123a4d29bf839ccd0adeb35ed25664d))
+
+
+### Bug Fixes
+
+* give points on quad edges and icosahedron vertices in ISEA4T and ISEA4D a nearby cell ([522604e](https://github.com/am2222/duckdb-dggs/commit/522604e1d4a5d70df54d37b892041ebab1919fae))
+* give points on quad edges and icosahedron vertices in ISEA4T and ISEA4D a nearby cell ([6ebf638](https://github.com/am2222/duckdb-dggs/commit/6ebf6381f3725b73f76b6f58e835334141042f99))
+* give points on quad edges and icosahedron vertices in ISEA4T and ISEA4D a nearby cell ([d260fc7](https://github.com/am2222/duckdb-dggs/commit/d260fc7e8123a4d29bf839ccd0adeb35ed25664d))
+* map a pole point to the same cell whatever its longitude ([522604e](https://github.com/am2222/duckdb-dggs/commit/522604e1d4a5d70df54d37b892041ebab1919fae))
+* map a pole point to the same cell whatever its longitude ([6ebf638](https://github.com/am2222/duckdb-dggs/commit/6ebf6381f3725b73f76b6f58e835334141042f99))
+* map a pole point to the same cell whatever its longitude ([d260fc7](https://github.com/am2222/duckdb-dggs/commit/d260fc7e8123a4d29bf839ccd0adeb35ed25664d))
+* raise an error for quads 0 and 11 in triangle and diamond grids ([522604e](https://github.com/am2222/duckdb-dggs/commit/522604e1d4a5d70df54d37b892041ebab1919fae))
+* raise an error for quads 0 and 11 in triangle and diamond grids ([6ebf638](https://github.com/am2222/duckdb-dggs/commit/6ebf6381f3725b73f76b6f58e835334141042f99))
+* raise an error for quads 0 and 11 in triangle and diamond grids ([d260fc7](https://github.com/am2222/duckdb-dggs/commit/d260fc7e8123a4d29bf839ccd0adeb35ed25664d))
+* raise DGGRID errors as query errors instead of exiting the DuckDB process ([522604e](https://github.com/am2222/duckdb-dggs/commit/522604e1d4a5d70df54d37b892041ebab1919fae))
+* raise DGGRID errors as query errors instead of exiting the DuckDB process ([6ebf638](https://github.com/am2222/duckdb-dggs/commit/6ebf6381f3725b73f76b6f58e835334141042f99))
+* raise DGGRID errors as query errors instead of exiting the DuckDB process ([d260fc7](https://github.com/am2222/duckdb-dggs/commit/d260fc7e8123a4d29bf839ccd0adeb35ed25664d))
+
 ## [0.2.0](https://github.com/am2222/duckdb-dggs/compare/v0.1.11...v0.2.0) (2026-10-25)
 
 
