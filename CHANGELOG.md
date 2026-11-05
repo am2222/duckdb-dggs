@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.2](https://github.com/am2222/duckdb-dggs/compare/v0.2.1...v0.2.2) (2026-11-05)
+
+
+### Features
+
+* **dggrid:** upgrade to DGGRID v9.15.1 and drop edge workarounds ([d43019a](https://github.com/am2222/duckdb-dggs/commit/d43019a847324c3a81786714ef9907fa81808c8e))
+* **dggrid:** upgrade to DGGRID v9.2 and drop quad-edge workaround ([9c9d3eb](https://github.com/am2222/duckdb-dggs/commit/9c9d3ebf97b6e9ffe89117b5594ce7d654486dee))
+
 ## [0.2.1](https://github.com/am2222/duckdb-dggs/compare/v0.2.0...v0.2.1) (2026-11-04)
 
 
