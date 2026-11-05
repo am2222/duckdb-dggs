@@ -245,21 +245,10 @@ struct Transformer {
   // Quads 0 and 11 hold only the hexagon grids' lone pentagon cells at the
   // north and south icosahedron vertices; triangle and diamond grids have no
   // cells there, so a Q2DI input address in those quads is rejected. (Points
-  // on quad edges and at the vertices otherwise quantise correctly since
-  // DGGRID 9.15.1, sahrk/DGGRID#108 and #109.)
-  //
-  // One case remains: in triangle and diamond grids at resolution 23 and
-  // finer, a point at the south icosahedron vertex lands more than one cell
-  // past its quad's edge in Q2DD, and dglib reports "coordinate out of
-  // range" (a Fatal, thrown as runtime_error, see CMakeLists.txt). Then
-  // quantise a copy clamped a hair (1e-11 quad units) inside the quad
-  // instead: that quad's corner cell, which touches the vertex.
+  // on quad edges and at the vertices quantise correctly since DGGRID 9.2,
+  // sahrk/DGGRID#108, #109 and #110.)
   void toQ2DI(LocPtr &loc) const {
-    if (dgg->gridTopo() == Hexagon) {
-      dgg->convert(loc.get());
-      return;
-    }
-    if (&loc->rf() == dgg) {
+    if (dgg->gridTopo() != Hexagon && &loc->rf() == dgg) {
       const int q = dgg->getAddress(*loc)->quadNum();
       if (q == 0 || q == 11)
         throw std::invalid_argument(
@@ -267,24 +256,6 @@ struct Transformer {
             " has no cells in a triangle or diamond grid (use quads 1-10)");
       return;
     }
-
-    q2ddRF->convert(loc.get());
-    const DgQ2DDCoord dd = *q2ddRF->getAddress(*loc);
-    try {
-      dgg->convert(loc.get());
-      return;
-    } catch (const std::runtime_error &) {
-      // retry from inside the quad below
-    }
-    // Quad coordinates: b = y / sin 60, a = x + b / 2, the quad is
-    // 0 <= a, b <= 1 (see DgIDGGBase::insertEdgeCrossings).
-    const long double tol = 1.0e-11L;
-    const long double b = dd.coord().y() / M_SIN60;
-    const long double a = dd.coord().x() + b / 2.0L;
-    const long double a2 = std::min(std::max(a, tol), 1.0L - tol);
-    const long double b2 = std::min(std::max(b, tol), 1.0L - tol);
-    DgQ2DDCoord inside(dd.quadNum(), DgDVec2D(a2 - b2 / 2.0L, b2 * M_SIN60));
-    loc.reset(q2ddRF->makeLocation(inside));
     dgg->convert(loc.get());
   }
 
