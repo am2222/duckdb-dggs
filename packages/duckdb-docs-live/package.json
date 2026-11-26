@@ -1,0 +1,25 @@
+{
+  "name": "duckdb-docs-live",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.mjs",
+    "./vitepress": "./vitepress/index.mjs",
+    "./vitepress/plugin": "./vitepress/plugin.mjs",
+    "./vitepress/engine": "./vitepress/engine.mjs",
+    "./vitepress/examples-loader": "./vitepress/examples.data.mjs",
+    "./status": "./vitepress/WasmStatus.vue"
+  },
+  "peerDependencies": {
+    "@duckdb/duckdb-wasm": "1.33.1-dev124.0",
+    "vitepress": "^1.6",
+    "vue": "^3"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "markdown-it": "14.1.0"
+  }
+}

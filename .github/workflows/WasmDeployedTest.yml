@@ -1,12 +1,16 @@
 #
-# Test the *deployed* duck_dggs WASM artifact on the haybarn R2 catalog.
+# Test the *deployed* duck_dggs WASM artifact (community-extensions.duckdb.org)
+# with our own wasm-sqllogictest action: the sqllogictest files and the SQL
+# examples in the docs, both taken from the commit that was released (`ref` in
+# description.yml), so a failure means the deployment rotted, not that the
+# docs run ahead of the release.
 #
-# This does NOT test the current commit — the published artifact lags this repo
-# by however long it takes a release to reach community-extensions. What it
-# catches is the deployment rotting underneath us: the catalog version being
-# retired, the wasm engine moving on, or a dependency (spatial) changing
-# behaviour. Those break users without any push to this repo, which is why the
-# primary trigger is a schedule rather than a push.
+# It does NOT test the current commit: the published artifact lags this repo by
+# however long a release takes to reach community-extensions. What it catches is
+# the deployment rotting underneath us (the engine moving on, a dependency such
+# as spatial changing behaviour), which breaks users without any push to this
+# repo, hence the schedule. The action and runner come from the checked-out
+# branch, so changes to them are validated on push/PR.
 #
 name: WASM Deployed Test
 
@@ -15,60 +19,72 @@ on:
     # Mondays 06:00 UTC.
     - cron: '0 6 * * 1'
   workflow_dispatch:
-    inputs:
-      engine_version:
-        description: 'Force the R2 catalog version (e.g. v1.5.5). Blank = auto-detect.'
-        required: false
-        default: ''
-      engine_pkg:
-        description: 'npm version of @haybarn/haybarn-wasm (default: latest)'
-        required: false
-        default: 'latest'
-  # Validate the harness itself when it changes.
   push:
     paths:
-      - 'scripts/test-wasm.sh'
-      - 'scripts/wasm-tester-patch.mjs'
       - '.github/workflows/WasmDeployedTest.yml'
+      - '.github/actions/wasm-sqllogictest/**'
+      - 'packages/duckdb-docs-live/src/**'
   pull_request:
     paths:
-      - 'scripts/test-wasm.sh'
-      - 'scripts/wasm-tester-patch.mjs'
       - '.github/workflows/WasmDeployedTest.yml'
+      - '.github/actions/wasm-sqllogictest/**'
+      - 'packages/duckdb-docs-live/src/**'
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  PUBLISHED_URL: https://community-extensions.duckdb.org/v2.0.1/wasm_eh/duck_dggs.duckdb_extension.wasm
+
 jobs:
   test-deployed-wasm:
-    name: ${{ matrix.platform }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        platform: [eh, mvp]
-
     steps:
-      # No submodules: the script only needs scripts/ and test/.
+      # The action and its runner. No submodules needed.
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
+      - name: Read the released ref
+        id: ref
+        run: echo "ref=$(yq '.repo.ref' description.yml)" >> "$GITHUB_OUTPUT"
 
-      - name: Test deployed WASM artifact
+      # The tests and docs that were released with the published build.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.ref.outputs.ref }}
+          path: released
+
+      # A release that includes the live doc examples ships this file. Older
+      # releases have untriaged docs, so there is nothing meaningful to check yet.
+      - name: Check the released ref has live doc examples
+        id: released
         env:
-          PLATFORM: ${{ matrix.platform }}
-          ENGINE_VERSION: ${{ github.event.inputs.engine_version }}
-          ENGINE_PKG: ${{ github.event.inputs.engine_pkg || 'latest' }}
-        run: ./scripts/test-wasm.sh -- --json "wasm-report-${{ matrix.platform }}.json"
+          REF: ${{ steps.ref.outputs.ref }}
+        run: |
+          if [[ -f released/docs/wasm-known-failures.json ]]; then
+            echo "live=true" >> "$GITHUB_OUTPUT"
+          else
+            msg="Released ref ${REF} predates the live doc examples; this check starts with the next release."
+            echo "::notice::${msg}"
+            echo "${msg}" >> "$GITHUB_STEP_SUMMARY"
+            echo "live=false" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Upload report
-        if: always()
-        uses: actions/upload-artifact@v4
+      - name: Download the published extension
+        if: steps.released.outputs.live == 'true'
+        run: curl -fsSLo "$RUNNER_TEMP/duck_dggs.duckdb_extension.wasm" "$PUBLISHED_URL"
+
+      - uses: ./.github/actions/wasm-sqllogictest
+        if: steps.released.outputs.live == 'true'
         with:
-          name: wasm-report-${{ matrix.platform }}
-          path: wasm-report-${{ matrix.platform }}.json
-          if-no-files-found: ignore
+          extension: duck_dggs
+          extension-file: ${{ runner.temp }}/duck_dggs.duckdb_extension.wasm
+          extension-source: ${{ env.PUBLISHED_URL }}
+          tests: released/test/sql
+          docs: released/docs
+          published: 'true'
+          known-failures: released/docs/wasm-known-failures.json

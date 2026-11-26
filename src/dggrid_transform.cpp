@@ -62,6 +62,8 @@
 #include <dglib/DgCell.h>         // DgCell
 #include <dglib/DgIVec2D.h>       // DgIVec2D (.i(), .j())
 #include <dglib/DgDVec2D.h>       // DgDVec2D (.x(), .y())
+#include <dglib/DgContCartRF.h>   // DgContCartRF (a quad's planar frame)
+#include <dglib/DgDiscRF2D.h>     // DgDiscRF2D (a quad's cell lattice)
 #include <dglib/DgConstants.h>    // M_PIl, M_ZERO
 #include <dglib/DgGeodesic.h>     // WGS84 geodesics (DGGRID 9.3)
 #include <dglib/DgWGS84RF.h>      // WGS84 axes
@@ -1141,12 +1143,117 @@ std::vector<SeqNum> seqNumNeighbors(const DggsParams &p, SeqNum seqnum) {
 // PARENT / CHILD
 // ===========================================================================
 
+// The cell of `dgg` holding a Q2DD point. dglib's Q2DD -> Q2DI converter only
+// accepts a cell within a fixed overage of the quad's i/j range (2 rows for
+// an aperture-7 grid, none otherwise). In aperture sequences that mix 7 with
+// 3 or 4 (e.g. '7437') the lattice is rotated like an aperture-7 grid, so a
+// point inside the quad can quantise to a cell further out, which dglib
+// reports as a (Fatal, here thrown) "coordinate out of range"; even
+// geo_to_seqnum fails on such points. Then quantise in the quad's extended
+// lattice and map the address to the quad that owns the cell, as dglib's
+// setAddNeighbors does for neighbours outside the quad.
+static SeqNum q2ddToSeqNum(const DgIDGGBase &dgg, const DgQ2DDCoord &q2dd) {
+  try {
+    LocPtr loc(dgg.q2ddRF().makeLocation(q2dd));
+    dgg.convert(loc.get());
+    const DgQ2DICoord *q2di = dgg.getAddress(*loc);
+    return static_cast<SeqNum>(dgg.bndRF().seqNumAddress(*q2di));
+  } catch (const std::runtime_error &) {
+    LocPtr loc(dgg.ccFrame().makeLocation(q2dd.coord()));
+    dgg.grid2D().convert(loc.get());
+    const DgIVec2D ij = *dgg.grid2D().getAddress(*loc);
+    const DgQ2DICoord q2di =
+        dgg.bndRF().q2dixToQ2di(DgQ2DICoord(q2dd.quadNum(), ij));
+    return static_cast<SeqNum>(dgg.bndRF().seqNumAddress(q2di));
+  }
+}
+
+// The res - 1 cell holding a point given in the Q2DD frame of quad `quad`
+// of t's grid. A point inside the quad is quantised to the parent grid
+// directly in that plane, as dglib does for every point (geo -> Q2DD ->
+// Q2DI), so a point that is not on a parent boundary is assigned exactly.
+// Going through geo instead adds the error of the inverse ISEA projection,
+// which near a face centre is large enough (~1e-6 of a res-4 aperture-7
+// cell) to move a point at a parent corner into the wrong parent. A point
+// outside the quad (the cell straddles a quad edge) goes through geo to the
+// Q2DD frame of the quad it lies in; those lie on icosahedron edges, away
+// from the face centres.
+static SeqNum parentOfQ2DDPoint(const Transformer &t,
+                                const DgIDGGBase &parent_dgg, int quad,
+                                const DgDVec2D &pt) {
+  const DgQ2DDCoord q2dd(quad, pt);
+  const long double qb = pt.y() / M_SIN60;
+  const long double qa = pt.x() + qb / 2.0L;
+  const bool inQuad = qa >= 0.0L && qa <= 1.0L && qb >= 0.0L && qb <= 1.0L;
+  if (inQuad)
+    return q2ddToSeqNum(parent_dgg, q2dd);
+
+  LocPtr loc(t.dgg->q2ddRF().makeLocation(q2dd));
+  t.dgg->vertexRF().convert(loc.get());
+  t.dgg->geoRF().convert(loc.get());
+  parent_dgg.q2ddRF().convert(loc.get());
+  return q2ddToSeqNum(parent_dgg, *parent_dgg.q2ddRF().getAddress(*loc));
+}
+
+// A hexagon cell's centre and vertices in the planar (Q2DD) frame of its quad.
+struct PlanarCell {
+  DgDVec2D centre;
+  std::vector<DgDVec2D> verts;
+};
+
+static PlanarCell planarCell(const DgIDGGBase &dgg, const DgQ2DICoord &q2di) {
+  const DgDiscRF2D &grid2D = dgg.grid2D();
+  const DgContCartRF &cc = dgg.ccFrame();
+  LocPtr centreLoc(grid2D.makeLocation(q2di.coord()));
+  DgPolygon verts(cc);
+  grid2D.setVertices(*centreLoc, verts);
+  cc.convert(verts);
+  cc.convert(centreLoc.get());
+  PlanarCell cell;
+  cell.centre = *cc.getAddress(*centreLoc);
+  for (int i = 0; i < verts.size(); i++)
+    cell.verts.push_back(*cc.getAddress(verts[i]));
+  return cell;
+}
+
+// The parent is the res - 1 cell that contains the cell's centre.
+//
+// In aperture 4 a boundary child's centre lies exactly on a parent edge, and
+// in aperture 3 a vertex child's centre lies exactly on a parent corner.
+// Quantising that point is a floating-point tie, which native (64-bit long
+// double on arm64) and WASM (128-bit soft long double) decided differently
+// for ~40 % of the cells. So for hexagon grids the centre is first moved by a
+// fixed offset of (1, 0.176) * 1e-4 of the cell radius in the Q2DD plane. The
+// direction (about 10 degrees) is at least 9 degrees from every hexagon edge
+// and radius of a pure grid (multiples of 30 degrees, or 19.1 + k * 30 in
+// class III aperture 7), and not parallel to any in the grids of aperture
+// sequences (one more aperture-7 step rotates them by another 19.1), so the
+// moved point is never on a parent boundary. 1e-4 of the radius is far from
+// both float noise and any other parent
+// boundary. The moved point is inside the cell, so the parent is always one
+// of seqNumAllParents. Cells whose centre is not on a parent boundary get the
+// same parent as before. Pentagons and triangle / diamond grids are
+// unchanged.
 SeqNum seqNumParent(const DggsParams &p, SeqNum seqnum) {
   if (p.res <= 0)
     throw std::runtime_error("Cannot get parent: already at resolution 0");
 
-  // Convert the child cell's center point to the parent resolution.
   auto t = getTransformer(p);
+  if (t->dgg->gridTopo() == Hexagon) {
+    const DgQ2DICoord q2di = q2diFromSeqNum(*t->bndRF, seqnum);
+    if (q2di.coord() != DgIVec2D(0, 0)) {
+      const PlanarCell cell = planarCell(*t->dgg, q2di);
+      const DgDVec2D &c = cell.centre;
+      const DgDVec2D &v = cell.verts.front();
+      const long double dx = v.x() - c.x(), dy = v.y() - c.y();
+      const long double radius = std::sqrt(dx * dx + dy * dy);
+      const DgDVec2D moved(c.x() + 1e-4L * radius, c.y() + 0.176e-4L * radius);
+      return parentOfQ2DDPoint(*t, t->idggs->idggBase(p.res - 1),
+                               q2di.quadNum(), moved);
+    }
+  }
+
+  // Convert the child cell's center point to the parent resolution.
   auto loc = t->inSEQNUM(seqnum);
   double lon_deg = 0, lat_deg = 0;
   t->outGEO(loc, lon_deg, lat_deg);
@@ -1156,38 +1263,105 @@ SeqNum seqNumParent(const DggsParams &p, SeqNum seqnum) {
   return geoToSeqNum(parentParams, lon_deg, lat_deg);
 }
 
+// The parents of a cell are the res - 1 cells that touch it (share area, an
+// edge or a corner): the containing parent (seqNumParent) first, then the
+// others in ascending order.
+//
+// dglib's setParents is not used for hexagon grids. Aperture 4 (DgIDGGS4H)
+// samples the cell's edge midpoints and aperture 3/7 (DgHexIDGGS) its
+// vertices, and those points can lie exactly on a parent edge or corner. A
+// parent that only touches the cell at a corner was then included or not
+// depending on the last bit of the float arithmetic, which differed between
+// platforms (cell 2412 at res 5 gave [599, 616, 615] on osx_arm64 and
+// [599, 598, 615] on WASM; it touches all four). The hexagon path therefore
+// no longer depends on DgIDGGS43H::setParents either (a dglib Fatal);
+// aperture 43 itself is rejected when the grid is built.
+//
+// Here, in the cell's planar Q2DD frame, each vertex and edge midpoint is
+// sampled by a ring of 8 points at distance eps = 1e-4 of the cell radius
+// (directions 10 + k * 45 degrees), plus one point moved inside the cell by
+// the same amount. Every parent whose closure holds the vertex or midpoint
+// covers at least one ring point (a parent's corner angle at a point of the
+// cell boundary is at least 60 degrees, wider than the 45-degree spacing),
+// and a ring point can only be in a parent whose closure comes within eps of
+// the cell, i.e. one that touches it: parents that do not touch the cell are
+// a sizeable fraction of a cell away. So whichever way a ring point that
+// happens to lie on a parent edge is decided, the union is the same on every
+// platform. The directions are not parallel to any parent edge through the
+// sampled point (multiples of 30 degrees, offset by 19.1 per aperture-7
+// step), so such ties do not occur in practice. eps is far above float
+// noise in the plane (~1e-15 relative; see parentOfQ2DDPoint for points
+// that go through geo).
 std::vector<SeqNum> seqNumAllParents(const DggsParams &p, SeqNum seqnum) {
   if (p.res <= 0)
     throw std::runtime_error("Cannot get parents: already at resolution 0");
 
   auto t = getTransformer(p);
-  auto loc = t->inSEQNUM(seqnum);
-
-  DgLocVector parents(*(t->idggs));
-  t->idggs->setParents(p.res, *loc, parents);
-
+  const DgIDGGBase &dgg = *t->dgg;
   const DgIDGGBase &parent_dgg = t->idggs->idggBase(p.res - 1);
+  const SeqNum primary = seqNumParent(p, seqnum);
 
+  std::set<SeqNum> others;
+
+  if (dgg.gridTopo() == Hexagon) {
+    const DgQ2DICoord q2di = q2diFromSeqNum(*t->bndRF, seqnum);
+
+    // A pentagon sits at an icosahedron vertex, inside the pentagon parent
+    // centred on the same vertex, and well away from its boundary: its only
+    // parent is the containing one.
+    if (q2di.coord() != DgIVec2D(0, 0)) {
+      const PlanarCell cell = planarCell(dgg, q2di);
+      const DgDVec2D &c = cell.centre;
+      const std::vector<DgDVec2D> &vs = cell.verts;
+      const long double rdx = vs.front().x() - c.x();
+      const long double rdy = vs.front().y() - c.y();
+      const long double eps = 1e-4L * std::sqrt(rdx * rdx + rdy * rdy);
+
+      static const std::vector<DgDVec2D> ring = [] {
+        std::vector<DgDVec2D> dirs;
+        for (int k = 0; k < 8; k++) {
+          const long double a = (10.0L + 45.0L * k) * std::acos(-1.0L) / 180.0L;
+          dirs.emplace_back(std::cos(a), std::sin(a));
+        }
+        return dirs;
+      }();
+
+      auto addPoint = [&](long double x, long double y) {
+        others.insert(
+            parentOfQ2DDPoint(*t, parent_dgg, q2di.quadNum(), DgDVec2D(x, y)));
+      };
+      auto addSample = [&](const DgDVec2D &v) {
+        // Inside the cell, towards the centre.
+        const long double dx = c.x() - v.x(), dy = c.y() - v.y();
+        const long double d = std::sqrt(dx * dx + dy * dy);
+        addPoint(v.x() + dx / d * eps, v.y() + dy / d * eps);
+        // The ring around the point.
+        for (const DgDVec2D &u : ring)
+          addPoint(v.x() + u.x() * eps, v.y() + u.y() * eps);
+      };
+      for (std::size_t i = 0; i < vs.size(); i++) {
+        addSample(vs[i]);
+        addSample(DgDVec2D::midPoint(vs[i], vs[(i + 1) % vs.size()]));
+      }
+    }
+  } else {
+    // Triangle / diamond grids are congruent: one parent.
+    auto loc = t->inSEQNUM(seqnum);
+    DgLocVector parents(*(t->idggs));
+    t->idggs->setParents(p.res, *loc, parents);
+    for (int i = 0; i < parents.size(); i++) {
+      DgLocation parent_loc(parents[i]);
+      parent_dgg.convert(&parent_loc);
+      const DgQ2DICoord *pq = parent_dgg.getAddress(parent_loc);
+      others.insert(static_cast<SeqNum>(parent_dgg.bndRF().seqNumAddress(*pq)));
+    }
+  }
+
+  others.erase(primary);
   std::vector<SeqNum> result;
-  std::set<uint64_t> seen;
-  for (int i = 0; i < parents.size(); i++) {
-    DgLocation parent_loc(parents[i]);
-    parent_dgg.convert(&parent_loc);
-    const DgQ2DICoord *parent_q2di = parent_dgg.getAddress(parent_loc);
-    uint64_t parent_seqnum = parent_dgg.bndRF().seqNumAddress(*parent_q2di);
-    if (seen.insert(parent_seqnum).second)
-      result.push_back(static_cast<SeqNum>(parent_seqnum));
-  }
-
-  // Ensure the primary (containing) parent is first
-  SeqNum primary = seqNumParent(p, seqnum);
-  auto it = std::find(result.begin(), result.end(), primary);
-  if (it != result.end() && it != result.begin()) {
-    std::iter_swap(result.begin(), it);
-  } else if (it == result.end()) {
-    result.insert(result.begin(), primary);
-  }
-
+  result.reserve(others.size() + 1);
+  result.push_back(primary);
+  result.insert(result.end(), others.begin(), others.end());
   return result;
 }
 

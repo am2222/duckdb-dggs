@@ -16,7 +16,7 @@ inputs:
   artifact:
     description: >
       Name of an artifact of this workflow run holding the `.wasm` file, e.g.
-      `<name>-v2.0.0-extension-wasm_eh` from extension-ci-tools'
+      `<name>-v2.0.1-extension-wasm_eh` from extension-ci-tools'
       `_extension_distribution.yml`.
     required: false
     default: ''
@@ -24,6 +24,31 @@ inputs:
     description: Test files or directories, one per line.
     required: false
     default: test/sql
+  docs:
+    description: >
+      Markdown files, directories or patterns such as `docs/**/*.md`, one per
+      line, whose SQL examples are run too. Page names are relative to the
+      directory before the first wildcard. Empty skips the doc examples.
+    required: false
+    default: ''
+  known-failures:
+    description: >
+      JSON file `[{ "id": ..., "reason": ... }]` of doc examples expected to
+      fail. The job fails if one now passes or no longer exists.
+    required: false
+    default: ''
+  published:
+    description: >
+      `true` marks doc examples that use functions the engine does not have as
+      `unreleased` instead of failing (for testing a published extension).
+    required: false
+    default: 'false'
+  extension-source:
+    description: >
+      Text shown in the job summary as the build under test (e.g. the URL it
+      was downloaded from). Empty shows the file path.
+    required: false
+    default: ''
   include-slow:
     description: Also run `.test_slow` files.
     required: false
@@ -31,17 +56,18 @@ inputs:
   engine-package:
     description: npm package of the DuckDB-WASM engine.
     required: false
-    default: '@haybarn/haybarn-wasm'
+    default: '@duckdb/duckdb-wasm'
   engine-version:
     description: >
       Version of `engine-package`. It must be built from the same DuckDB
       version as the extension.
     required: false
-    default: 2.0.0-rc5
+    default: 1.33.1-dev124.0
   bundle:
     description: >
-      Engine bundle: `base` (DuckDB-WASM 2.x, platform wasm_eh), or `eh` /
-      `mvp` (1.x). Empty picks the first the engine has.
+      Engine bundle. The 2.x engines (the official @duckdb/duckdb-wasm
+      1.33.x dev builds for DuckDB v2, and others) ship one `base` bundle;
+      `eh` / `mvp` are DuckDB 1.x builds. Empty picks the first the engine has.
     required: false
     default: ''
   repositories:
@@ -90,6 +116,10 @@ runs:
         ARTIFACT: ${{ inputs.artifact }}
         ARTIFACT_DIR: ${{ runner.temp }}/wasm-sqllogictest-extension
         TESTS: ${{ inputs.tests }}
+        DOCS: ${{ inputs.docs }}
+        KNOWN_FAILURES: ${{ inputs.known-failures }}
+        PUBLISHED: ${{ inputs.published }}
+        EXTENSION_SOURCE: ${{ inputs.extension-source }}
         INCLUDE_SLOW: ${{ inputs.include-slow }}
         ENGINE_PACKAGE: ${{ inputs.engine-package }}
         BUNDLE: ${{ inputs.bundle }}
@@ -113,6 +143,10 @@ runs:
         args=(--extension "$EXTENSION" --extension-file "$file" --engine-package "$ENGINE_PACKAGE"
               --timeout "$TIMEOUT" --json "$RUNNER_TEMP/wasm-sqllogictest-report.json")
         while IFS= read -r t; do [[ -n "${t// }" ]] && args+=(--tests "$t"); done <<< "$TESTS"
+        while IFS= read -r d; do [[ -n "${d// }" ]] && args+=(--docs "$d"); done <<< "$DOCS"
+        [[ -n "$KNOWN_FAILURES" ]] && args+=(--known-failures "$KNOWN_FAILURES")
+        [[ "$PUBLISHED" == "true" ]] && args+=(--published)
+        [[ -n "$EXTENSION_SOURCE" ]] && args+=(--extension-source "$EXTENSION_SOURCE")
         while IFS= read -r r; do [[ -n "${r// }" ]] && args+=(--repo "$r"); done <<< "$REPOSITORIES"
         [[ "$INCLUDE_SLOW" == "true" ]] && args+=(--include-slow)
         [[ -n "$BUNDLE" ]] && args+=(--bundle "$BUNDLE")

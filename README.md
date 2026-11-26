@@ -48,7 +48,7 @@ SELECT geo_to_seqnum('POINT(0.0 0.0)'::GEOMETRY, 5,
 
 -- Cover a polygon with cells (cells whose centre lies inside)
 SELECT polygon_to_seqnums('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))'::GEOMETRY, 4);
--- → [600, 601, 617, 618, 634]
+-- → [600, 601, 616, 617, 618, 633, 634]
 
 -- A cell and everything within 1 step of it
 SELECT seqnum_k_ring(2380::UBIGINT, 1, 5);
@@ -77,17 +77,15 @@ SELECT seqnum_to_quadtree(100::UBIGINT, 4, dggs_preset('ISEA4T'));
 
 See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for build and test instructions.
 
-Native tests run with `make test`. To verify the **deployed WASM build** loads
-and runs the test suite in WebAssembly:
+Native tests run with `make test`. To run the sqllogictest files and the docs'
+SQL examples in DuckDB-WASM:
 
 ```sh
-make test_wasm         # published tests against the live WASM artifact
-make test_wasm_local   # this working tree's tests against the live artifact
+make test_wasm         # the published build (community-extensions)
+make test_wasm_local   # the build from `make wasm_eh`
 ```
 
-Both wrap `scripts/test-wasm.sh` (clones the WASM tester into `build/wasm-test/`
-and auto-detects the deployed catalog version; needs Node 18+). See
-[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#testing-the-deployed-wasm-build) for details.
+See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#testing-the-wasm-build) for details.
 
 ---
 
@@ -152,7 +150,7 @@ Every function has a second overload that accepts an explicit [`dggs_params`](#d
 | [`dggs_res_info`](#dggs_res_info) | res | `STRUCT` | All grid statistics for a resolution. |
 | [`seqnum_neighbors`](#seqnum_neighbors) | SEQNUM, res | `UBIGINT[]` | Topologically adjacent cells. |
 | [`seqnum_parent`](#seqnum_parent) | SEQNUM, res | `UBIGINT` | Parent cell at res-1. |
-| [`seqnum_all_parents`](#seqnum_all_parents) | SEQNUM, res | `UBIGINT[]` | All touching parent cells at res-1. |
+| [`seqnum_all_parents`](#seqnum_all_parents) | SEQNUM, res | `UBIGINT[]` | All parent cells at res-1 that touch the cell (area, edge or corner). |
 | [`seqnum_children`](#seqnum_children) | SEQNUM, res | `UBIGINT[]` | Child cells at res+1. |
 | [`seqnum_index_parent`](#seqnum_index_parent) | SEQNUM, res | `UBIGINT` | Parent in the Z3/ZOrder/Z7/QUADTREE index hierarchy (strict tree). |
 | [`seqnum_index_children`](#seqnum_index_children) | SEQNUM, res | `UBIGINT[]` | Children in the Z3/ZOrder/Z7/QUADTREE index hierarchy (non-overlapping). |
@@ -278,14 +276,14 @@ orientation and topology.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `projection` | `VARCHAR` | Projection type. `'ISEA'` (Icosahedral Snyder Equal Area), `'IVEA'` (Icosahedral Vertex-oriented Equal Area), `'FULLER'` or `'GNOMONIC'`. |
+| `projection` | `VARCHAR` | Projection type. `'ISEA'` (Icosahedral Snyder Equal Area), `'IVEA'` (Icosahedral Vertex-oriented Equal Area), `'FULLER'` (Dymaxion) or `'GNOMONIC'` (icosahedral gnomonic, not equal area). |
 | `aperture` | `INTEGER` | Cell aperture (ratio of parent to child cell area). `3`, `4`, or `7`. |
 | `topology` | `VARCHAR` | Cell shape. `'HEXAGON'`, `'TRIANGLE'`, or `'DIAMOND'`. |
 | `azimuth_deg` | `DOUBLE` | Rotation of the icosahedron around the pole axis, in degrees. |
 | `pole_lat_deg` | `DOUBLE` | Latitude of the icosahedron pole, in degrees. Default ISEA: `58.28252559`. |
 | `pole_lon_deg` | `DOUBLE` | Longitude of the icosahedron pole, in degrees. Default ISEA: `11.25`. |
 | `is_aperture_sequence` | `BOOLEAN` | When `true`, uses a mixed-aperture sequence instead of a fixed aperture. Default: `false`. |
-| `aperture_sequence` | `VARCHAR` | A string of digits (`'3'`, `'4'`, `'7'`) defining the aperture at each resolution level. Only used when `is_aperture_sequence` is `true`. |
+| `aperture_sequence` | `VARCHAR` | Aperture at each resolution as a digit string (e.g. `'3437'`). Only used when `is_aperture_sequence` is `true`. |
 | `datum` | `VARCHAR` | Datum of lon/lat input and output: `'AUTHALIC_SPHERE'` (default) or `'WGS84'` (geodetic latitudes are mapped to and from the authalic sphere the grid is built on). |
 
 The resolution is **not** part of `dggs_params`; it is always passed as a
@@ -1374,7 +1372,7 @@ SELECT dggs_cell_area_km(5);
 │ dggs_cell_area_km(5) │
 │        double        │
 ├──────────────────────┤
-│    49811.09587149303  │
+│    49811.09587149302  │
 └──────────────────────┘
 ```
 
@@ -1463,7 +1461,7 @@ SELECT dggs_res_info(5);
 │                                                    dggs_res_info(5)                                                     │
 │                  struct(res integer, cells ubigint, area_km double, spacing_km double, cls_km double)                   │
 ├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│ {'res': 5, 'cells': 10242, 'area_km': 49811.09587149303, 'spacing_km': 220.4266384815885, 'cls_km': 251.84027008853553} │
+│ {'res': 5, 'cells': 10242, 'area_km': 49811.09587149302, 'spacing_km': 220.4266384815885, 'cls_km': 251.84027008853553} │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -1518,6 +1516,11 @@ UBIGINT[] seqnum_neighbors (seqnum UBIGINT, res INTEGER, params STRUCT)
 
 Returns the sequential indices of all topologically adjacent cells. For hexagon grids, interior cells have 6 neighbors; pentagon cells (at icosahedron vertices) have 5. The result does not include the input cell itself.
 
+The neighbor relationship is symmetric: if B is in `seqnum_neighbors(A)`, then A is in `seqnum_neighbors(B)`.
+
+> [!NOTE]
+> Not supported for `TRIANGLE` topology grids.
+
 #### Example
 
 ```sql
@@ -1530,6 +1533,15 @@ SELECT seqnum_neighbors(2380::UBIGINT, 5);
 ├──────────────────────────────────────────────────┤
 │ [2412, 2413, 2381, 2348, 2347, 2379]             │
 └──────────────────────────────────────────────────┘
+```
+
+#### Vectorised usage
+
+The function is fully vectorised -- use it over a table column:
+
+```sql
+SELECT seqnum, seqnum_neighbors(seqnum, 5) AS neighbors
+FROM (VALUES (2380::UBIGINT), (2381::UBIGINT), (100::UBIGINT)) t(seqnum);
 ```
 
 ### seqnum_k_ring
@@ -1580,6 +1592,11 @@ UBIGINT seqnum_parent (seqnum UBIGINT, res INTEGER, params STRUCT)
 
 Returns the sequential index of the parent cell at resolution `res - 1` that contains the centre of the given cell. The resolution must be > 0.
 
+In hexagon grids with aperture 3 or 4 steps many cells have their centre exactly on a parent's edge (aperture 4) or corner (aperture 3), so the centre is in two or three parents. Such a cell gets the parent that holds a point moved from the centre by a tiny fixed step (1e-4 of the cell radius, in a fixed direction in the grid's planar frame). The result is always one of the cell's [`seqnum_all_parents`](#seqnum_all_parents), and it is the same on every platform.
+
+> [!WARNING]
+> **Changed in 0.3.0.** Cells centred exactly on a parent edge or corner now get their parent by the fixed rule above, identically on every platform. Earlier versions could return either parent, depending on the platform (native and WASM disagreed for about 40 % of the cells of grids with aperture 3 or 4 steps). Cell 2412 at res 5, for example, has its centre on the edge between 599 and 615 and is now 615 everywhere. Cells whose centre is inside one parent are unchanged.
+
 #### Example
 
 ```sql
@@ -1592,6 +1609,12 @@ SELECT seqnum_parent(2380::UBIGINT, 5);
 ├───────────────────────────────────────────┤
 │                                       599 │
 └───────────────────────────────────────────┘
+```
+
+```sql
+-- Cell 2412's centre is on the edge between 599 and 615
+SELECT seqnum_parent(2412::UBIGINT, 5);
+-- → 615
 ```
 
 ----
@@ -1607,12 +1630,20 @@ UBIGINT[] seqnum_all_parents (seqnum UBIGINT, res INTEGER, params STRUCT)
 
 #### Description
 
-Returns the sequential indices of all parent cells at resolution `res - 1` that touch the given cell. Interior cells typically have 1 parent; cells on a parent-cell boundary may touch 2 or 3 parents. The primary (containing) parent is always the first element.
+Returns the sequential indices of every parent cell at resolution `res - 1` that **touches** the cell (shares area, an edge or a corner): the containing parent (`seqnum_parent`) first, then the others in ascending order. An interior cell has 1 parent. A cell on a parent boundary has 3 in aperture 3 and 7 grids, and 4 in aperture 4 grids (it straddles 2 parents and touches 2 more at its corners).
+
+This is useful for identifying boundary cells that belong to multiple parent regions.
+
+> [!WARNING]
+> **Changed in 0.3.0.** Results are now complete and identical on every platform. Earlier versions missed some of the parents that touch the cell only at a corner, which ones depended on the platform, and the parents came in no fixed order. For cell 2412 at res 5, for example, the 0.2.2 docs showed `[615, 599, 616]` and other platforms gave other lists, such as `[599, 616, 615]` or `[599, 598, 615]`; it is now `[615, 598, 599, 616]` everywhere. The first element follows the new tie rule of [`seqnum_parent`](#seqnum_parent).
+
+> [!NOTE]
+> **Why corner contacts used to differ between platforms.** In aperture 3, 4 and 7 hexagon grids a cell's corner can sit exactly on a parent's edge or corner. Cell 2412 at res 5 shares about half its area with each of 599 and 615, and touches 598 and 616 at a single corner each. Whether such a corner was counted was decided by floating-point rounding, so platforms disagreed: native gave `[599, 616, 615]` and WASM `[599, 598, 615]`. Now every parent that touches the cell is included, found by sampling a small ring of points around each corner and edge midpoint, so the result is the same everywhere.
 
 #### Example
 
 ```sql
--- Cell 2412 sits on a parent boundary, touching 3 parents
+-- Cell 2412 straddles two parents and touches two more at its corners
 SELECT seqnum_all_parents(2412::UBIGINT, 5);
 ```
 ```
@@ -1620,8 +1651,14 @@ SELECT seqnum_all_parents(2412::UBIGINT, 5);
 │ seqnum_all_parents(CAST(2412 AS "UBIGINT"), 5) │
 │                    uint64[]                    │
 ├────────────────────────────────────────────────┤
-│ [615, 599, 616]                                │
+│ [615, 598, 599, 616]                           │
 └────────────────────────────────────────────────┘
+```
+
+```sql
+-- Interior cell has just 1 parent
+SELECT seqnum_all_parents(2380::UBIGINT, 5);
+-- → [599]
 ```
 
 ----
@@ -1637,7 +1674,10 @@ UBIGINT[] seqnum_children (seqnum UBIGINT, res INTEGER, params STRUCT)
 
 #### Description
 
-Returns the sequential indices of all child cells at resolution `res + 1` that belong to the given cell. For aperture-4 hexagon grids this returns 7 children (1 interior + 6 boundary).
+Returns the sequential indices of all child cells at resolution `res + 1` that belong to the given cell. For aperture-4 hexagon grids this returns 7 children (1 interior + 6 boundary). The interior child (whose centre is inside the parent) is listed first.
+
+> [!TIP]
+> Boundary children are shared with adjacent parent cells. To check which parent "owns" a child, use `seqnum_parent` on the child.
 
 #### Example
 
@@ -1651,6 +1691,18 @@ SELECT seqnum_children(599::UBIGINT, 4);
 ├────────────────────────────────────────────┤
 │ [2380, 2412, 2413, 2381, 2348, 2347, 2379] │
 └────────────────────────────────────────────┘
+```
+
+#### Round-trip consistency
+
+A cell is always among its parent's children:
+
+```sql
+SELECT list_contains(
+    seqnum_children(seqnum_parent(2380::UBIGINT, 5), 4),
+    2380::UBIGINT
+);
+-- → true
 ```
 
 ### seqnum_index_parent
@@ -2010,7 +2062,7 @@ SELECT polygon_to_seqnums('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))'::GEOMETRY, 4)
 │ polygon_to_seqnums(CAST('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))' AS GEOMETRY), 4) │
 │                                     uint64[]                                      │
 ├───────────────────────────────────────────────────────────────────────────────────┤
-│ [600, 601, 617, 618, 634]                                                         │
+│ [600, 601, 616, 617, 618, 633, 634]                                               │
 └───────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -2169,7 +2221,7 @@ canonical 64-bit packed index.
 
 ```sql
 SELECT igeo7_from_string('0800432');
--- → 612839406969683967
+-- → 9233329214155915263
 ```
 
 ----
@@ -2379,7 +2431,7 @@ return the invalid sentinel `UINT64_MAX` — use `igeo7_is_valid` to filter.
 ```sql
 SELECT list_transform(
     igeo7_get_neighbours(igeo7_from_string('0800432')),
-    x -> igeo7_to_string(x)) AS neighbours;
+    lambda x: igeo7_to_string(x)) AS neighbours;
 -- → [0800433, 0800651, 0800064, 0800436, 0800430, 0800655]
 ```
 

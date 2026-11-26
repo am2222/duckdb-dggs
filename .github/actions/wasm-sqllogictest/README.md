@@ -25,7 +25,7 @@ Add a job after the build in the workflow that calls `_extension_distribution.ym
       - uses: am2222/duckdb-dggs/.github/actions/wasm-sqllogictest@main
         with:
           extension: my_extension
-          artifact: my_extension-v2.0.0-extension-wasm_eh
+          artifact: my_extension-v2.0.1-extension-wasm_eh
 ```
 
 The artifact is named `<extension>-<duckdb_version>-extension-wasm_eh` by
@@ -39,29 +39,56 @@ runner to stay fixed.
 | `extension-file` | | Path to the `.wasm` instead of `artifact`. |
 | `tests` | `test/sql` | Files or directories, one per line. |
 | `include-slow` | `false` | Also run `.test_slow`. |
-| `engine-package` | `@haybarn/haybarn-wasm` | npm engine package. |
-| `engine-version` | `2.0.0-rc5` | Must match the DuckDB version the extension was built for. |
-| `bundle` | first available | `base` (2.x, wasm_eh), or `eh` / `mvp` (1.x). |
+| `docs` | | Markdown files, directories or patterns (`docs/**/*.md`), one per line, whose SQL examples are run too. See below. |
+| `known-failures` | | JSON `[{ "id", "reason" }]` of doc examples expected to fail. |
+| `published` | `false` | Report doc examples using functions the engine lacks as `unreleased` instead of failing. |
+| `extension-source` | file path | Text shown in the summary as the build under test (e.g. a download URL). Display only. |
+| `engine-package` | `@duckdb/duckdb-wasm` | npm engine package. |
+| `engine-version` | `1.33.1-dev124.0` | DuckDB v2.0.1 build. Must match the DuckDB version the extension was built for. |
+| `bundle` | first available | The 2.x engines (the official `@duckdb/duckdb-wasm` 1.33.x dev builds and others) ship one `base` bundle; `eh` / `mvp` are DuckDB 1.x builds. |
 | `repositories` | `https://extensions.duckdb.org` | Tried, after the engine's own, for other required extensions. |
 | `timeout` | `600` | Seconds per test file. |
 
-For a DuckDB v1.5 extension, use e.g. `engine-version: 1.5.6-rc6` with
-`bundle: eh` and the `...-v1.5.6-extension-wasm_eh` artifact (or `mvp`).
+For a DuckDB v1.5 extension, use an engine built from DuckDB 1.5 with
+`bundle: eh` and the `...-v1.5.x-extension-wasm_eh` artifact (or `mvp`).
 
 The job fails if any file fails, or if no file ran at all (which usually means
 the extension never loaded). Results also go to the job summary.
 
+## Doc examples
+
+With `docs`, the SQL fences in the markdown pages (` ```sql `; ` ```sql run `
+runs and shows without comparing, ` ```sql norun ` never runs) are executed as
+well, each page in a fresh database with the extension `LOAD`ed from the `.wasm`
+file. An example's `-- →` comments or a following box-drawing table are its
+expected result and are compared as `VARCHAR` strings. A page that does
+`LOAD spatial` gets it installed from the engine's repository or `repositories`.
+
+A directory is walked for `.md` files (skipping `node_modules`, `.vitepress` and
+`superpowers`); a pattern such as `docs/**/*.md` walks the directory before its
+first wildcard. Page names are paths relative to that directory, without `.md`.
+When `docs` is given and `tests` is left empty, only the doc examples run.
+
+Each example ends as `match`, `differs`, `error`, `skipped`, `shown` or
+`unreleased`. The job summary gets a `### Doc examples` section naming the
+build (`extension-source`), a row per non-matching example, and a count line.
+The job fails on any `differs` or `error`, on a `known-failures` problem (an
+entry that now passes or no longer exists), or if no example was found. Use
+`published: true` when testing an already-published extension that may lag the
+docs: examples that call missing functions become `unreleased`, not failures.
+
 ## Run locally
 
 ```sh
-cd .github/actions/wasm-sqllogictest && npm install && cd -
+cd .github/actions/wasm-sqllogictest && npm install --no-save web-worker@1.2.0 @duckdb/duckdb-wasm@1.33.1-dev124.0 && cd -
 node .github/actions/wasm-sqllogictest/run.mjs \
   --extension my_extension \
   --extension-file path/to/my_extension.duckdb_extension.wasm \
-  --repo https://extensions.duckdb.org
+  --repo https://extensions.duckdb.org \
+  --docs docs --known-failures docs/wasm-known-failures.json
 ```
 
-To test a CI build: `gh run download <run-id> -n my_extension-v2.0.0-extension-wasm_eh -D wasm`.
+To test a CI build: `gh run download <run-id> -n my_extension-v2.0.1-extension-wasm_eh -D wasm`.
 
 ## Supported sqllogictest features
 

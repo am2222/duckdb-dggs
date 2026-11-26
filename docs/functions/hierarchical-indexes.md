@@ -221,7 +221,7 @@ Parse a compact IGEO7/Z7 string into the packed 64-bit index.
 
 ```sql
 SELECT igeo7_from_string('0800432');
--- → 612839406969683967
+-- → 9233329214155915263
 ```
 
 ### igeo7_to_string
@@ -347,7 +347,7 @@ filter with `igeo7_is_valid`.
 ```sql
 SELECT list_transform(
     igeo7_get_neighbours(igeo7_from_string('0800432')),
-    x -> igeo7_to_string(x));
+    lambda x: igeo7_to_string(x));
 -- → [0800433, 0800651, 0800064, 0800436, 0800430, 0800655]
 ```
 

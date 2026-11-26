@@ -13,3 +13,4 @@ docs/.vitepress/cache
 docs/.vitepress/dist
 .github/actions/wasm-sqllogictest/node_modules
 .github/actions/wasm-sqllogictest/package-lock.json
+packages/duckdb-docs-live/node_modules

@@ -438,6 +438,35 @@ SELECT seqnum_parent(2380::UBIGINT, 5)
 ----
 true
 
+# A cell whose centre lies exactly on a parent edge (aperture 4) or corner
+# (aperture 3) gets the parent that holds a point moved from the centre a
+# tiny step in a fixed direction (+x, +0.176x) in the Q2DD plane, so the
+# result does not depend on float rounding (native and WASM agree).
+# This test steps an absolute 1e-7 in Q2DD units while the code steps
+# 1e-4 x the cell radius (~1.8e-6 at aperture 4 res 5); both are far below
+# the distance to any other parent boundary, so both must land in the same
+# parent.
+query III
+SELECT ap, r,
+       count(*) FILTER (WHERE seqnum_parent(c::UBIGINT, r, p)
+                          <> q2dd_to_seqnum(q.quad, q.x + 1e-7, q.y + 0.176e-7, r - 1, p))
+FROM (SELECT ap, r, c, p, seqnum_to_q2dd(c::UBIGINT, r, p) AS q
+      FROM (SELECT ap, r, dggs_params('ISEA', ap, 'HEXAGON', 0.0, 58.28252559, 11.25) AS p
+            FROM (VALUES (4, 5), (3, 5), (7, 4)) g(ap, r)),
+           LATERAL range(1, dggs_n_cells(r, p)::BIGINT + 1) t(c))
+GROUP BY ap, r ORDER BY ap;
+----
+3	5	0
+4	5	0
+7	4	0
+
+# 2412 straddles 599 and 615 (its centre is on their shared edge); the rule
+# puts it in 615
+query I
+SELECT seqnum_parent(2412::UBIGINT, 5);
+----
+615
+
 # ============================================================
 # Children — seqnum_children
 # ============================================================
@@ -536,6 +565,97 @@ SELECT seqnum_all_parents(2380::UBIGINT, 5)
      = seqnum_all_parents(2380::UBIGINT, 5, dggs_params('ISEA', 4, 'HEXAGON', 0.0, 58.28252559, 11.25));
 ----
 true
+
+# Every parent that touches the cell: 2412 straddles 599 and 615 (about
+# 50/50) and touches 598 and 616 at a single corner each. Containing parent
+# (seqnum_parent, 615) first, the rest ascending. Same on every platform.
+query I
+SELECT seqnum_all_parents(2412::UBIGINT, 5);
+----
+[615, 598, 599, 616]
+
+query I
+SELECT seqnum_all_parents(2380::UBIGINT, 5);
+----
+[599]
+
+query I
+SELECT (seqnum_all_parents(2412::UBIGINT, 5))[1] = seqnum_parent(2412::UBIGINT, 5);
+----
+true
+
+# A sample of 201 cells: 1 to 4 parents, the containing parent first, the
+# rest in ascending order without duplicates
+query I
+SELECT bool_and(len(l) BETWEEN 1 AND 4
+            AND l[1] = p
+            AND list_sort(list_slice(l, 2, len(l))) = list_slice(l, 2, len(l))
+            AND len(list_distinct(l)) = len(l))
+FROM (SELECT seqnum_all_parents(c::UBIGINT, 5) AS l, seqnum_parent(c::UBIGINT, 5) AS p
+      FROM range(1, 10242, 51) t(c));
+----
+true
+
+# Every cell of aperture 4 res 5, aperture 3 res 5 and aperture 7 res 4:
+# the parent is one of the touching parents and comes first; the number of
+# parents is 1 or 4 (aperture 4: a boundary child straddles 2 and touches 2
+# more at its corners) or 1 or 3 (aperture 3 and 7)
+query III
+SELECT ap,
+       bool_and(list_contains(l, p) AND l[1] = p AND len(list_distinct(l)) = len(l)),
+       list_sort(list(DISTINCT len(l)))
+FROM (SELECT ap, seqnum_all_parents(c::UBIGINT, r, dggs_params('ISEA', ap, 'HEXAGON', 0.0, 58.28252559, 11.25)) AS l,
+             seqnum_parent(c::UBIGINT, r, dggs_params('ISEA', ap, 'HEXAGON', 0.0, 58.28252559, 11.25)) AS p
+      FROM (VALUES (4, 5), (3, 5), (7, 4)) g(ap, r),
+           LATERAL range(1, dggs_n_cells(r, dggs_params('ISEA', ap, 'HEXAGON', 0.0, 58.28252559, 11.25))::BIGINT + 1) t(c))
+GROUP BY ap ORDER BY ap;
+----
+3	true	[1, 3]
+4	true	[1, 4]
+7	true	[1, 3]
+
+# High resolutions: a cell and its neighbours near (10.1, 45.3) and near an
+# icosahedron face centre (-78.75, 69.0948): 1 or 4 parents (aperture 4) or
+# 1 or 3 (aperture 7), both occurring, parent first
+query III
+SELECT ap,
+       bool_and(l[1] = p), list_sort(list(DISTINCT len(l)))
+FROM (SELECT ap, seqnum_all_parents(n, r, dggs_params('ISEA', ap, 'HEXAGON', 0.0, 58.28252559, 11.25)) AS l,
+             seqnum_parent(n, r, dggs_params('ISEA', ap, 'HEXAGON', 0.0, 58.28252559, 11.25)) AS p
+      FROM (SELECT ap, r, unnest(list_append(seqnum_neighbors(c, r, dggs_params('ISEA', ap, 'HEXAGON', 0.0, 58.28252559, 11.25)), c)) AS n
+            FROM (SELECT ap, r, geo_to_seqnum(pt::GEOMETRY, r, dggs_params('ISEA', ap, 'HEXAGON', 0.0, 58.28252559, 11.25)) AS c
+                  FROM (VALUES (4, 28), (7, 20)) g(ap, r),
+                       (VALUES ('POINT(10.1 45.3)'), ('POINT(-78.75 69.09484255211069)')) q(pt))))
+GROUP BY ap ORDER BY ap;
+----
+4	true	[1, 4]
+7	true	[1, 3]
+
+# Mixed aperture 4/3 sequence: no crash, containing parent first, tail ascending
+query I
+SELECT bool_and(len(l) >= 1 AND l[1] = p
+            AND list_sort(list_slice(l, 2, len(l))) = list_slice(l, 2, len(l)))
+FROM (SELECT seqnum_all_parents(c::UBIGINT, 3, dggs_params('ISEA', 4, 'HEXAGON', 0.0, 58.28252559, 11.25, true, '4343')) AS l,
+             seqnum_parent(c::UBIGINT, 3, dggs_params('ISEA', 4, 'HEXAGON', 0.0, 58.28252559, 11.25, true, '4343')) AS p
+      FROM range(1, 163) t(c));
+----
+true
+
+# Aperture sequences that mix 7 with 3 or 4: every cell has a parent (dglib's
+# own Q2DD -> Q2DI converter rejects some points in these grids) and it is
+# one of its touching parents, listed first; 1 or 3 parents
+query IIII
+SELECT seq, count(*),
+       bool_and(list_contains(l, p) AND l[1] = p),
+       list_sort(list(DISTINCT len(l)))
+FROM (SELECT seq, seqnum_all_parents(c::UBIGINT, 3, dggs_params('ISEA', 7, 'HEXAGON', 0.0, 58.28252559, 11.25, true, seq)) AS l,
+             seqnum_parent(c::UBIGINT, 3, dggs_params('ISEA', 7, 'HEXAGON', 0.0, 58.28252559, 11.25, true, seq)) AS p
+      FROM (VALUES ('7437'), ('7373')) g(seq),
+           LATERAL range(1, dggs_n_cells(3, dggs_params('ISEA', 7, 'HEXAGON', 0.0, 58.28252559, 11.25, true, seq))::BIGINT + 1) t(c))
+GROUP BY seq ORDER BY seq;
+----
+7373	1472	true	[1, 3]
+7437	842	true	[1, 3]
 
 # ============================================================
 # Vertex2DD — seqnum_to_vertex2dd, vertex2dd_to_seqnum

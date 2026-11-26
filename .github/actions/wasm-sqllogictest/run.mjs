@@ -6,10 +6,17 @@
 //                --extension-file build/duck_dggs.duckdb_extension.wasm \
 //                [--tests test/sql] [--include-slow] [--bundle base|eh|mvp]
 //                [--repo URL ...] [--timeout 600] [--json report.json] [--verbose]
+//                [--docs <file|dir|dir/**/*.md> ...] [--known-failures docs/wasm-known-failures.json]
+//                [--published] [--extension-source <text>]
 //
 // Each test file gets a fresh database. `require <extension>` LOADs the file
 // under test; any other required extension is installed from the engine's own
 // repository or one of the --repo URLs, and the file is skipped if none has it.
+//
+// --docs also runs the SQL examples in markdown pages (one fresh database per
+// page, the extension LOADed from --extension-file). With --docs and no
+// --tests, only the doc examples run. --published marks examples that use
+// functions the engine does not know as `unreleased` instead of `error`.
 //
 // Results are compared as DuckDB's native runner does: every value is cast to
 // VARCHAR inside the engine, so lists, structs, geometries and doubles print
@@ -20,6 +27,14 @@ import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  errorMessage, isEngineCrash, numericallyEqual, runQuery,
+} from '../../../packages/duckdb-docs-live/src/sql.mjs';
+import { extractExamples } from '../../../packages/duckdb-docs-live/src/extract.mjs';
+import { runExample, applyKnownFailures } from '../../../packages/duckdb-docs-live/src/examples.mjs';
+import {
+  DOC_SKIP_DIRS, STATUS_ORDER, countStatuses,
+} from '../../../packages/duckdb-docs-live/src/status.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(path.join(here, 'package.json'));
@@ -39,7 +54,11 @@ function parseArgs(argv) {
     timeout: 600,
     json: null,
     verbose: false,
-    enginePackage: '@haybarn/haybarn-wasm',
+    enginePackage: '@duckdb/duckdb-wasm',
+    docs: [],
+    knownFailures: null,
+    published: false,
+    extensionSource: '',
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -58,6 +77,10 @@ function parseArgs(argv) {
       case '--json': opts.json = next(); break;
       case '--verbose': opts.verbose = true; break;
       case '--engine-package': opts.enginePackage = next(); break;
+      case '--docs': opts.docs.push(next()); break;
+      case '--known-failures': opts.knownFailures = next(); break;
+      case '--published': opts.published = true; break;
+      case '--extension-source': opts.extensionSource = next(); break;
       case '-h': case '--help':
         console.log(fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(1, 10).join('\n'));
         process.exit(0);
@@ -69,7 +92,7 @@ function parseArgs(argv) {
   if (!opts.extensionFile) throw new Error('--extension-file is required');
   opts.extensionFile = path.resolve(opts.extensionFile);
   if (!fs.existsSync(opts.extensionFile)) throw new Error(`no such file: ${opts.extensionFile}`);
-  if (opts.tests.length === 0) opts.tests.push('test/sql');
+  if (opts.tests.length === 0 && opts.docs.length === 0) opts.tests.push('test/sql');
   return opts;
 }
 
@@ -252,61 +275,6 @@ function flatten(records, vars = {}) {
 
 const quote = (s) => s.replace(/'/g, "''");
 
-function stripSemicolon(sql) {
-  return sql.trim().replace(/;\s*$/, '');
-}
-
-function errorMessage(e) {
-  return String(e?.message ?? e).replace(/\n\s+at .*$/gs, '').trim();
-}
-
-// The WASM module stops for good on exit(), abort() or a trap; every later
-// query on it fails or hangs, so the rest of the file can't be run.
-function isEngineCrash(message) {
-  return /Program terminated with exit|Aborted\(|RuntimeError: |ExitStatus/.test(message);
-}
-
-// DuckDB's runner prints NULL as "NULL" and the empty string as "(empty)".
-function render(v) {
-  if (v === null || v === undefined) return 'NULL';
-  const s = typeof v === 'bigint' ? v.toString() : String(v);
-  return s === '' ? '(empty)' : s;
-}
-
-function rowsOf(table) {
-  const cols = table.schema.fields.map((f) => f.name);
-  const rows = [];
-  for (const row of table.toArray()) {
-    const obj = row.toJSON();
-    rows.push(cols.map((c) => render(obj[c])));
-  }
-  return { cols: cols.length, rows };
-}
-
-// Runs a query and returns its rows as strings. Plain SELECTs are wrapped so
-// the engine renders every value; anything that can't be wrapped (PRAGMA,
-// DESCRIBE, multiple statements, ...) falls back to rendering in JavaScript.
-async function runQuery(conn, sql) {
-  const body = stripSemicolon(sql);
-  if (/^\s*(select|with|from|values|table|\()/i.test(body)) {
-    try {
-      return rowsOf(await conn.query(`SELECT COLUMNS(*)::VARCHAR FROM (${body}\n) AS __sqllogictest`));
-    } catch (e) {
-      if (isEngineCrash(errorMessage(e))) throw e;
-      // otherwise fall through: report the unwrapped query's own error, if any
-    }
-  }
-  return rowsOf(await conn.query(sql));
-}
-
-function numericallyEqual(a, b) {
-  if (!/^-?[\d.]+(e[-+]?\d+)?$/i.test(a) || !/^-?[\d.]+(e[-+]?\d+)?$/i.test(b)) return false;
-  const x = Number(a);
-  const y = Number(b);
-  if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
-  return Math.abs(x - y) <= 1e-9 * Math.max(1, Math.abs(x), Math.abs(y));
-}
-
 function compareQuery(rec, actual) {
   const ncols = rec.types.length || actual.cols;
   if (actual.cols !== ncols) {
@@ -380,16 +348,22 @@ async function satisfyRequire(conn, rec, opts) {
     if (await loaded()) return 'ok';
   } catch { /* not an extension query we can answer; try loading */ }
 
-  // The engine's default repository first, then each --repo.
-  for (const repo of [null, ...opts.repos]) {
+  if (await installExtension(conn, name, opts.repos)) return 'ok';
+  return { skip: `require ${name}: not available for this engine` };
+}
+
+// Installs and LOADs `name` from the engine's default repository, then from
+// each repo in turn. Returns whether one of them had it.
+async function installExtension(conn, name, repos) {
+  for (const repo of [null, ...repos]) {
     try {
       const from = repo ? ` FROM '${quote(repo)}'` : '';
       await conn.query(`FORCE INSTALL '${quote(name)}'${from}`);
       await conn.query(`LOAD '${quote(name)}'`);
-      return 'ok';
+      return true;
     } catch { /* next repository */ }
   }
-  return { skip: `require ${name}: not available for this engine` };
+  return false;
 }
 
 async function runFile(engine, file, opts) {
@@ -558,6 +532,154 @@ function summaryMarkdown(results, info) {
   return `${lines.join('\n')}\n`;
 }
 
+// ---------------------------------------------------------------------------
+// Doc examples
+// ---------------------------------------------------------------------------
+
+const GLOB_CHARS = /[*?[\]{}]/;
+
+// Returns [{ file, page }]. A directory is walked for .md files; a pattern such
+// as docs/**/*.md walks the directory before its first wildcard segment. The page
+// name is the path relative to that root, without .md, with forward slashes.
+function collectDocs(inputs) {
+  const found = new Map();
+  const walk = (dir, root) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+      if (DOC_SKIP_DIRS.has(e.name)) continue;
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) walk(full, root);
+      else if (e.name.endsWith('.md')) add(full, root);
+    }
+  };
+  const add = (file, root) => {
+    const page = path.relative(root, file).split(path.sep).join('/').replace(/\.md$/, '');
+    if (!found.has(file)) found.set(file, page);
+  };
+  for (const input of inputs) {
+    let root = input;
+    if (GLOB_CHARS.test(input)) {
+      const segs = input.split('/');
+      const i = segs.findIndex((s) => GLOB_CHARS.test(s));
+      root = segs.slice(0, i).join('/') || '.';
+    }
+    if (!fs.existsSync(root)) throw new Error(`no such docs path: ${root}`);
+    if (fs.statSync(root).isDirectory()) walk(root, root);
+    else add(root, path.dirname(root));
+  }
+  return [...found].map(([file, page]) => ({ file, page }));
+}
+
+async function runDocs(engine, opts) {
+  const pages = collectDocs(opts.docs);
+  const examples = [];
+  for (const { file, page } of pages) {
+    examples.push(...extractExamples(fs.readFileSync(file, 'utf8'), page));
+  }
+  if (examples.length === 0) {
+    console.log('\nno doc examples found');
+    return { failed: true, results: [], problems: [] };
+  }
+
+  const byPage = new Map();
+  for (const ex of examples) {
+    if (!byPage.has(ex.page)) byPage.set(ex.page, []);
+    byPage.get(ex.page).push(ex);
+  }
+
+  let results = [];
+  for (const [page, exs] of byPage) {
+    const handle = await openDb(engine);
+    const session = {
+      dead: false,
+      connect: () => handle.db.connect(),
+      async ensure(name) {
+        if (!(await installExtension(handle.conn, name, opts.repos))) {
+          throw new Error(`${name} is not available for this engine`);
+        }
+      },
+    };
+    try {
+      await handle.conn.query(`LOAD '${quote(opts.extensionFile)}'`);
+    } catch (e) {
+      const detail = `could not load ${opts.extensionFile}: ${errorMessage(e)}`;
+      for (const ex of exs) results.push({ id: ex.id, page, status: 'error', detail, statements: [] });
+      await handle.close();
+      continue;
+    }
+    console.log(`docs ${page}: ${exs.length} example(s)`);
+    try {
+      for (const ex of exs) {
+        results.push(await withTimeout(
+          runExample(session, ex, { published: opts.published }), opts.timeout, ex.id)
+          .then((r) => (r.failures ? { id: ex.id, page, status: 'error', detail: r.failures[0].message, statements: [] } : r)));
+      }
+    } finally {
+      await handle.close();
+    }
+  }
+
+  let problems = [];
+  if (opts.knownFailures) {
+    const known = JSON.parse(fs.readFileSync(opts.knownFailures, 'utf8'));
+    ({ results, problems } = applyKnownFailures(results, known));
+  }
+  const byId = new Map(examples.map((e) => [e.id, e]));
+  return { failed: false, results, problems, byId };
+}
+
+const STATUS_ICON = { match: '✅', differs: '❌', error: '❌', skipped: '⏭️', shown: '👁️', unreleased: '🕓' };
+
+const oneLine = (s, max = 200) => {
+  const t = String(s ?? '').replace(/\s+/g, ' ').trim();
+  return t.length > max ? `${t.slice(0, max - 1)}…` : t;
+};
+
+function docDetail(r) {
+  if (r.detail) return r.detail;
+  const bad = r.statements.find((s) => s.status !== 'match' && s.status !== 'shown') ?? r.statements.find((s) => s.detail);
+  if (!bad) return '';
+  return bad.detail ?? '';
+}
+
+// Shared with the /wasm-status page, so both count the same way.
+const docCounts = countStatuses;
+
+const countLine = (n) => STATUS_ORDER.map((s) => `${n[s]} ${s}`).join(' · ');
+
+function docsSummaryMarkdown(docs, info) {
+  const lines = [
+    '### Doc examples',
+    '',
+    `Engine \`${info.engine}\` (${info.version}, ${info.platform}), extension \`${info.extensionSource}\``,
+    '',
+    '| | Page | Example | Detail |',
+    '|---|---|---|---|',
+  ];
+  for (const r of docs.results) {
+    if (r.status === 'match') continue;
+    const ex = docs.byId.get(r.id);
+    const name = ex ? `${ex.heading} (line ${ex.line})` : r.id;
+    const detail = oneLine(docDetail(r)).replace(/\|/g, '\\|');
+    lines.push(`| ${STATUS_ICON[r.status]} ${r.status} | \`${r.page}\` | ${name} | ${detail} |`);
+  }
+  for (const p of docs.problems) lines.push(`| ❌ problem | | | ${oneLine(p)} |`);
+  lines.push('', countLine(docCounts(docs.results)), '');
+  return lines.join('\n');
+}
+
+function printDocs(docs) {
+  console.log('\nDoc examples');
+  for (const r of docs.results) {
+    if (r.status === 'match') continue;
+    const ex = docs.byId.get(r.id);
+    console.log(`${r.status.padEnd(10)} ${r.id}${ex ? ` (${ex.heading}, line ${ex.line})` : ''}`);
+    const d = oneLine(docDetail(r), 300);
+    if (d) console.log(`           ${d}`);
+  }
+  for (const p of docs.problems) console.log(`problem    ${p}`);
+  console.log(`\n${countLine(docCounts(docs.results))}  (${docs.results.length} examples)`);
+}
+
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
   const engine = loadEngine(opts.enginePackage, opts.bundle);
@@ -571,8 +693,8 @@ async function main() {
   console.log(`engine ${opts.enginePackage}@${engineVersion}: DuckDB ${info.version}, ${info.platform} (${engine.bundle} bundle)`);
   console.log(`extension ${opts.extension}: ${opts.extensionFile}`);
 
-  const files = collectTests(opts.tests, opts.includeSlow);
-  if (files.length === 0) throw new Error(`no test files under ${opts.tests.join(', ')}`);
+  const files = opts.tests.length ? collectTests(opts.tests, opts.includeSlow) : [];
+  if (opts.tests.length && files.length === 0) throw new Error(`no test files under ${opts.tests.join(', ')}`);
 
   const results = [];
   for (const file of files) {
@@ -597,14 +719,36 @@ async function main() {
   }
 
   const count = (s) => results.filter((r) => r.status === s).length;
-  console.log(`\n${count('pass')} passed, ${count('fail')} failed, ${count('skip')} skipped`);
+  if (opts.tests.length) console.log(`\n${count('pass')} passed, ${count('fail')} failed, ${count('skip')} skipped`);
 
   const meta = { extension: opts.extension, file: opts.extensionFile, engine: `${opts.enginePackage}@${engineVersion}`, ...info };
-  if (opts.json) fs.writeFileSync(opts.json, JSON.stringify({ ...meta, results }, null, 2));
-  if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summaryMarkdown(results, meta));
+  const extensionSource = opts.extensionSource || opts.extensionFile;
+
+  let docs = null;
+  if (opts.docs.length) {
+    docs = await runDocs(engine, opts);
+    if (docs.results.length) printDocs(docs);
+  }
+
+  if (opts.json) {
+    fs.writeFileSync(opts.json, JSON.stringify({ ...meta, results, ...(docs ? { docs: docs.results, docsProblems: docs.problems } : {}) }, null, 2));
+  }
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    if (opts.tests.length) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summaryMarkdown(results, meta));
+    if (docs && docs.results.length) {
+      fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, docsSummaryMarkdown(docs, { ...info, engine: meta.engine, extensionSource }));
+    }
+  }
 
   // All-skipped is not a pass: it usually means the extension never loaded.
-  if (count('fail') > 0 || count('pass') === 0) process.exit(1);
+  // (Only applies when the sqllogictest part ran.)
+  const testsFailed = opts.tests.length > 0 && (count('fail') > 0 || count('pass') === 0);
+  let docsFailed = false;
+  if (docs) {
+    const n = docCounts(docs.results);
+    docsFailed = docs.failed || n.differs > 0 || n.error > 0 || docs.problems.length > 0;
+  }
+  if (testsFailed || docsFailed) process.exit(1);
 }
 
 main().catch((e) => {
