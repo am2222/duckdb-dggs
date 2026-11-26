@@ -4,7 +4,7 @@
 // unchanged. The engine is imported on the first Run, never before.
 import { computed, getCurrentInstance, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { detectNeeds, splitStatements } from '../src/extract.mjs';
-import { runExample } from '../src/examples.mjs';
+import { applyKnownFailures, runExample } from '../src/examples.mjs';
 import { errorMessage } from '../src/sql.mjs';
 import BuildNotice from './BuildNotice.vue';
 import {
@@ -57,8 +57,19 @@ const BADGES = {
   unreleased: { icon: '🕓', text: 'not in the published build yet', cls: 'muted' },
 };
 
+// The known-failures list, applied exactly as CI and /wasm-status apply it: a
+// listed example that differs or errors is a known issue, not a ✗; one that
+// matches again shows ✓ (and /wasm-status and CI list it as a problem).
+const known = (config.knownFailures ?? []).find((k) => k.id === props.example.id) ?? null;
+
 const badge = computed(() => {
   if (!result.value || ranEdited.value) return null;
+  if (known) {
+    const [judged] = applyKnownFailures([result.value], [known]).results;
+    if (judged.status === 'skipped' && result.value.status !== 'skipped') {
+      return { icon: 'ⓘ', text: `known issue: ${known.reason}`, cls: 'muted known' };
+    }
+  }
   return BADGES[result.value.status] ?? null;
 });
 
@@ -126,7 +137,7 @@ async function run() {
     const session = await getSession(config, buildUrl);
     if (session.setupError) {
       showBanner(session.setupError, uid);
-      result.value = { status: 'error', detail: session.setupError, statements: [] };
+      result.value = { id: props.example.id, page: props.example.page, status: 'error', detail: session.setupError, statements: [] };
       ranEdited.value = isEdited;
       return;
     }
@@ -139,7 +150,7 @@ async function run() {
   } catch (e) {
     const message = `could not start DuckDB-WASM: ${errorMessage(e)}`;
     showBanner(message, uid);
-    result.value = { status: 'error', detail: message, statements: [] };
+    result.value = { id: props.example.id, page: props.example.page, status: 'error', detail: message, statements: [] };
     ranEdited.value = isEdited;
   } finally {
     const total = performance.now() - t0;
@@ -198,7 +209,7 @@ function onKeydown(e) {
     </div>
 
     <div v-if="result && !running" class="live-sql-result">
-      <pre v-if="detail && result.status !== 'match'" class="live-sql-detail" :class="result.status">{{ detail }}</pre>
+      <pre v-if="detail && result.status !== 'match'" class="live-sql-detail" :class="badge?.cls.includes('known') ? 'known' : result.status">{{ detail }}</pre>
       <div v-for="(t, i) in tables" :key="i" class="live-sql-table-block">
         <div v-if="tables.length > 1" class="live-sql-table-sql">{{ t.sql.split('\n').filter((l) => !l.startsWith('--')).join(' ') }}</div>
         <div class="live-sql-table-wrap">

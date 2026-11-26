@@ -258,3 +258,36 @@ The CI target is the fresh build, so triage against **this commit's** WASM build
 - [ ] **Step 3:** `cd docs && npm ci && npm run build` → PASS (simulates `docs.yml`).
 - [ ] **Step 4:** `cd packages/duckdb-docs-live && npm test` → PASS (everything still green).
 - [ ] **Step 5: Final checkpoint** — `git status -sb` (the branch line must not show `...origin/main`), `git diff --stat origin/main`. Hand over to the maintainer with the triage notes; **do not commit**.
+
+### Task 10: Deterministic `seqnum_all_parents` (added 2026-11-25, maintainer request)
+
+**Why:** Triage found `seqnum_all_parents(2412, 5)` = `[599, 616, 615]` on native osx_arm64 and `[599, 598, 615]` on WASM. Measured with `spatial`: cell 2412 (res 5) shares 50.06 % of its area with 599 and 49.94 % with 615, and touches 598 and 616 at **a single point each** (zero area). DGGRID's `DgIDGGS4H::setAddParents` (third_party/DGGRID/src/lib/dglib/lib/DgIDGGS4H.cpp:63) samples edge midpoints in the projected plane, and some fall exactly on a parent edge/vertex — a mathematical tie decided by last-bit float rounding (FMA contraction, WASM's 128-bit soft `long double`). Aperture 3/7 (`DgHexIDGGS::setAddParents`, `DgIDGGS7H::setAddParents`) sample the child's vertices, which are tie-prone the same way. `DgIDGGS43H::setAddParents` is a dglib Fatal (`report(..., Fatal)` → exit).
+
+**Decision (maintainer):** `seqnum_all_parents` returns the parents whose cells **share area** with the cell, identically on every platform: the containing parent (`seqnum_parent`) first, then the others in ascending order. For 2412 @ res 5: `[599, 615]`. Document the definition and the reason on the function's doc page.
+
+**Files:**
+- Modify: `src/dggrid_transform.cpp` `seqNumAllParents` (≈ line 1132)
+- Modify: `test/sql/duck_dggs.test` (All Parents block ≈ line 503)
+- Modify: `docs/functions/parent-child.md` (`## seqnum_all_parents`)
+- Modify: `docs/wasm-known-failures.json` (remove the `seqnum_all_parents` entry), `docs/superpowers/plans/2026-11-25-triage-notes.md` (resolution line)
+
+**Interfaces:** `std::vector<SeqNum> seqNumAllParents(const DggsParams &p, SeqNum seqnum)` — signature unchanged.
+
+Algorithm (the part a signature doesn't determine):
+- Do not call `idggs->setParents`. Get the child cell's vertices in the res grid's planar `backFrame()` (`grids()[res]->setVertices`, then `backFrame().getAddress(...)`), and its centre in the same frame.
+- Sample points: each vertex and each edge midpoint, each moved toward the centre: `q = c + (v - c) * (1 - 1e-6)`. 1e-6 of the cell radius is far above float noise (~1e-15) and far below any real overlap, so no sample sits on a parent boundary.
+- Convert each sample to the res-1 grid, take its SEQNUM, dedupe. Primary = `seqNumParent(p, seqnum)`; put it first (insert if missing); sort the rest ascending.
+- Hexagon topologies only (apertures 3, 4, 7 and mixed 43 — 43 must no longer hit the dglib Fatal). For TRIANGLE / DIAMOND (and any other topology), keep today's behaviour (single congruent parent) unchanged.
+
+- [ ] **Step 1: Tests first** (`test/sql/duck_dggs.test`, All Parents block):
+  - `SELECT seqnum_all_parents(2412::UBIGINT, 5)` → `[599, 615]`
+  - interior `seqnum_all_parents(2380::UBIGINT, 5)` → `[599]` (unchanged)
+  - first element equals `seqnum_parent` for 2412 and 2380 (keep existing)
+  - every listed parent shares area: `SELECT bool_and(…)` is not possible without spatial, so instead assert for a sample of 200 cells at res 5 (`range(0, 10242, 51)`) that `len(seqnum_all_parents(c,5)) BETWEEN 1 AND 3` and `list_sort(list_slice(l, 2, len(l))) = list_slice(l, 2, len(l))` (tail ascending).
+  - aperture 7 and aperture 3 (`dggs_params('ISEA', 7, 'HEXAGON', …)`, `dggs_params('ISEA', 3, 'HEXAGON', …)`): first element = `seqnum_parent` with the same params, length ≥ 1, for a couple of cells.
+  - mixed 43 hex params (see grid-configuration docs / `dggs_params` for how aperture 43 is expressed): `seqnum_all_parents` returns without crashing, first = `seqnum_parent`.
+- [ ] **Step 2:** native build in this worktree: `git submodule update --init --recursive` (pass `--reference /Users/majid/duckdb-dggs/duckdb` for the duckdb submodule if it speeds things up; never modify /Users/majid/duckdb-dggs), then `GEN=ninja make release` (long; run in background). Run `make test` → the new tests FAIL (RED).
+- [ ] **Step 3:** implement; `make release && make test` → PASS (GREEN), all existing tests still pass.
+- [ ] **Step 4 (the cross-platform proof):** with `spatial` on the native build, for 2412 @ 5 and the 200-cell sample, assert every returned parent has `ST_Area(ST_Intersection(child, parent)) > 0` and every parent with positive overlap among the child's neighbours' parents is returned. Then WASM: build `wasm_eh` locally if the toolchain allows (user's emsdk 4.0.7 at /Users/majid/Ready/Apps/tests/personal/emsdk — do NOT change its active version; `make wasm_eh` per extension-ci-tools); if that isn't feasible in reasonable time, say so — CI's `wasm-test` job (test/sql + doc examples on the fresh wasm_eh) is the WASM proof after the maintainer pushes.
+- [ ] **Step 5:** docs. In `## seqnum_all_parents`: definition = "parents whose cells share area with the cell; the containing parent (`seqnum_parent`) first, the rest ascending". Update the example to `[599, 615]` with comment "Cell 2412 straddles two parents". Add a short `::: info Why not cells that only touch at a corner?` block: aperture-4/3/7 cells can meet parent corners exactly; parents touching only at a single point are excluded because deciding them is a floating-point tie that gave different answers on different platforms (e.g. native vs WASM); sampling is moved slightly inside the cell so the result is the same everywhere. Remove the known-failures entry; update triage notes.
+- [ ] **Step 6:** run the doc examples with `run.mjs --docs docs --known-failures docs/wasm-known-failures.json` against the CI wasm file **with `--published` off**: `seqnum_all_parents/1` will now `differ` on that older build (it still has the old algorithm) — expected; record it, don't add a known failure. Checkpoint.

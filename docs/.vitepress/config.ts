@@ -32,6 +32,7 @@ export default defineConfig({
         items: [
           { text: 'Getting Started', link: '/guide/getting-started' },
           { text: 'Grid Configuration', link: '/guide/grid-configuration' },
+          { text: 'WASM status', link: '/wasm-status' },
         ]
       },
       {

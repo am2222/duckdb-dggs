@@ -4,7 +4,9 @@ import { buildUrlFromLocation, clearBuildOverride } from './build.mjs';
 
 export const LIVE_SQL_CONFIG = Symbol('duckdb-docs-live:config');
 
-const DEFAULTS = { extension: '', engineVersion: '', repositories: [] };
+// knownFailures: the docs/wasm-known-failures.json list ([{id, reason}]), so a
+// listed example shows "known issue" instead of ✗, as CI and /wasm-status do.
+const DEFAULTS = { extension: '', engineVersion: '', repositories: [], knownFailures: [] };
 
 export function provideLiveSqlConfig(app, config) {
   app.provide(LIVE_SQL_CONFIG, { ...DEFAULTS, ...config });

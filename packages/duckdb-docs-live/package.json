@@ -8,6 +8,7 @@
     "./vitepress": "./vitepress/index.mjs",
     "./vitepress/plugin": "./vitepress/plugin.mjs",
     "./vitepress/engine": "./vitepress/engine.mjs",
+    "./vitepress/examples-loader": "./vitepress/examples.data.mjs",
     "./status": "./vitepress/WasmStatus.vue"
   },
   "peerDependencies": {

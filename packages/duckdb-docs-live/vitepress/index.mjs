@@ -4,6 +4,7 @@
 import './style.css';
 import LiveSql from './LiveSql.vue';
 import BuildNotice from './BuildNotice.vue';
+import WasmStatus from './WasmStatus.vue';
 
-export { LiveSql, BuildNotice };
+export { LiveSql, BuildNotice, WasmStatus };
 export { provideLiveSqlConfig, useLiveSqlConfig, LIVE_SQL_CONFIG, liveState, usePublished } from './config.mjs';

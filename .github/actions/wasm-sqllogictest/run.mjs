@@ -32,6 +32,9 @@ import {
 } from '../../../packages/duckdb-docs-live/src/sql.mjs';
 import { extractExamples } from '../../../packages/duckdb-docs-live/src/extract.mjs';
 import { runExample, applyKnownFailures } from '../../../packages/duckdb-docs-live/src/examples.mjs';
+import {
+  DOC_SKIP_DIRS, STATUS_ORDER, countStatuses,
+} from '../../../packages/duckdb-docs-live/src/status.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(path.join(here, 'package.json'));
@@ -533,7 +536,6 @@ function summaryMarkdown(results, info) {
 // Doc examples
 // ---------------------------------------------------------------------------
 
-const DOC_SKIP_DIRS = new Set(['node_modules', '.vitepress', 'superpowers']);
 const GLOB_CHARS = /[*?[\]{}]/;
 
 // Returns [{ file, page }]. A directory is walked for .md files; a pattern such
@@ -625,7 +627,6 @@ async function runDocs(engine, opts) {
   return { failed: false, results, problems, byId };
 }
 
-const STATUS_ORDER = ['match', 'differs', 'error', 'skipped', 'shown', 'unreleased'];
 const STATUS_ICON = { match: '✅', differs: '❌', error: '❌', skipped: '⏭️', shown: '👁️', unreleased: '🕓' };
 
 const oneLine = (s, max = 200) => {
@@ -640,11 +641,8 @@ function docDetail(r) {
   return bad.detail ?? '';
 }
 
-function docCounts(results) {
-  const n = Object.fromEntries(STATUS_ORDER.map((s) => [s, 0]));
-  for (const r of results) n[r.status] = (n[r.status] ?? 0) + 1;
-  return n;
-}
+// Shared with the /wasm-status page, so both count the same way.
+const docCounts = countStatuses;
 
 const countLine = (n) => STATUS_ORDER.map((s) => `${n[s]} ${s}`).join(' · ');
 
