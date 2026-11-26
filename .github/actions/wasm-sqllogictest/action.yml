@@ -31,13 +31,13 @@ inputs:
   engine-package:
     description: npm package of the DuckDB-WASM engine.
     required: false
-    default: '@haybarn/haybarn-wasm'
+    default: '@duckdb/duckdb-wasm'
   engine-version:
     description: >
       Version of `engine-package`. It must be built from the same DuckDB
       version as the extension.
     required: false
-    default: 2.0.0-rc5
+    default: 1.33.1-dev119.0
   bundle:
     description: >
       Engine bundle: `base` (DuckDB-WASM 2.x, platform wasm_eh), or `eh` /
