@@ -1150,7 +1150,12 @@ SeqNum seqNumParent(const DggsParams &p, SeqNum seqnum) {
 // a remaining tie between two parents is decided, both of them are area-
 // sharing parents and the set is the same everywhere. 1e-6 of the distance
 // to the centre is far above float noise (~1e-15 relative) and far below any
-// real overlap.
+// real overlap, as long as the sample is quantised in the plane (below).
+//
+// The first element is seqNumParent, which quantises the cell centre. For
+// aperture 3/4 cells whose centre lies exactly on a parent edge or vertex
+// that is itself a tie, so the first element (not the set) can still differ
+// between platforms for those cells.
 std::vector<SeqNum> seqNumAllParents(const DggsParams &p, SeqNum seqnum) {
   if (p.res <= 0)
     throw std::runtime_error("Cannot get parents: already at resolution 0");
@@ -1194,24 +1199,39 @@ std::vector<SeqNum> seqNumAllParents(const DggsParams &p, SeqNum seqnum) {
                         c.y() + (v.y() - c.y()) * keep);
       };
 
-      // Sample points in the Q2DD frame of the cell's quad (the same frame
-      // dglib builds the cell boundary in), then on to the parent grid.
-      DgLocVector samples(dgg.q2ddRF());
-      auto add = [&](const DgDVec2D &pt) {
-        LocPtr loc(dgg.q2ddRF().makeLocation(
-            DgQ2DDCoord(q2di.quadNum(), inward(pt))));
-        samples.push_back(*loc);
+      // Each sample is a point in the Q2DD frame of the cell's quad (the
+      // frame dglib builds the cell boundary in). One inside the quad is
+      // quantised to the parent grid directly in that plane, as dglib does
+      // for every point (geo -> Q2DD -> Q2DI), which is exact. Going through
+      // geo instead would add the error of the inverse ISEA projection, which
+      // near a face centre is large enough (~1e-6 of a res-4 aperture-7 cell)
+      // to move a sample at a parent corner into the wrong parent. A sample
+      // outside the quad (the cell straddles a quad edge) has to go through
+      // geo to reach the quad it lies in; those lie on icosahedron edges,
+      // away from the face centres.
+      const DgQ2DDRF &parentQ2DD = parent_dgg.q2ddRF();
+      auto addSample = [&](const DgDVec2D &v) {
+        const DgDVec2D pt = inward(v);
+        const DgQ2DDCoord q2dd(q2di.quadNum(), pt);
+        const long double qb = pt.y() / M_SIN60;
+        const long double qa = pt.x() + qb / 2.0L;
+        const bool inQuad = qa >= 0.0L && qa <= 1.0L && qb >= 0.0L && qb <= 1.0L;
+        if (inQuad) {
+          LocPtr loc(parentQ2DD.makeLocation(q2dd));
+          parent_dgg.convert(loc.get());
+          others.insert(toParentSeqNum(*loc));
+        } else {
+          LocPtr loc(dgg.q2ddRF().makeLocation(q2dd));
+          dgg.vertexRF().convert(loc.get());
+          dgg.geoRF().convert(loc.get());
+          parent_dgg.convert(loc.get());
+          others.insert(toParentSeqNum(*loc));
+        }
       };
       for (std::size_t i = 0; i < vs.size(); i++) {
-        add(vs[i]);
-        add(DgDVec2D::midPoint(vs[i], vs[(i + 1) % vs.size()]));
+        addSample(vs[i]);
+        addSample(DgDVec2D::midPoint(vs[i], vs[(i + 1) % vs.size()]));
       }
-
-      dgg.vertexRF().convert(samples);
-      dgg.geoRF().convert(samples);
-      parent_dgg.convert(samples);
-      for (int i = 0; i < samples.size(); i++)
-        others.insert(toParentSeqNum(samples[i]));
     }
   } else {
     // Triangle / diamond grids are congruent: one parent.

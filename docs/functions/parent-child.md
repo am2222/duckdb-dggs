@@ -49,7 +49,7 @@ Earlier versions also returned parents that only touch the cell at a corner, and
 :::
 
 ::: info Why not cells that only touch at a corner?
-In aperture 3, 4 and 7 hexagon grids a cell's corner can sit exactly on a parent's edge or corner. Cell 2412 at res 5 shares about half its area with each of 599 and 615, and touches 598 and 616 at a single point each. Deciding whether such a point belongs to a parent is a floating-point tie, and it gave different answers on different platforms (native and WASM). So parents that only touch the cell at a point are excluded, and the points used to find the parents are moved slightly inside the cell, which gives the same result everywhere.
+In aperture 3, 4 and 7 hexagon grids a cell's corner can sit exactly on a parent's edge or corner. Cell 2412 at res 5 shares about half its area with each of 599 and 615, and touches 598 and 616 at a single point each. Deciding whether such a point belongs to a parent is a floating-point tie, and it gave different answers on different platforms (native and WASM). So parents that only touch the cell at a point are excluded, and the points used to find the parents are moved slightly inside the cell, so every platform finds the same parents.
 :::
 
 ### Example
