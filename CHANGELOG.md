@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.3.0](https://github.com/am2222/duckdb-dggs/compare/v0.2.2...v0.3.0) (2026-11-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* **parent-child:** make seqnum_parent and seqnum_all_parents identical on every platform
+
+### Features
+
+* **ci:** test doc examples against the WASM build in wasm-sqllogictest ([9ab1c90](https://github.com/am2222/duckdb-dggs/commit/9ab1c90ff441e7edeb97c60a27b5f68cc72d7cd8))
+* **dggrid:** upgrade to DGGRID v9.31 with QUADTREE and WGS84 geodesics ([#35](https://github.com/am2222/duckdb-dggs/issues/35)) ([e073e2e](https://github.com/am2222/duckdb-dggs/commit/e073e2e598e1c9f7d4f3016ae83d00da32f8913f))
+* **docs:** run every doc example live in DuckDB-WASM with a /wasm-status page ([9ab1c90](https://github.com/am2222/duckdb-dggs/commit/9ab1c90ff441e7edeb97c60a27b5f68cc72d7cd8))
+* **geodesy:** add datum argument to geo_distance_km and geo_azimuth_deg ([e073e2e](https://github.com/am2222/duckdb-dggs/commit/e073e2e598e1c9f7d4f3016ae83d00da32f8913f))
+
+
+### Bug Fixes
+
+* **parent-child:** make seqnum_parent and seqnum_all_parents identical on every platform ([9ab1c90](https://github.com/am2222/duckdb-dggs/commit/9ab1c90ff441e7edeb97c60a27b5f68cc72d7cd8))
+* **parent-child:** stop seqnum_parent and seqnum_all_parents from failing on aperture sequences that mix 7 with 3 or 4 ([9ab1c90](https://github.com/am2222/duckdb-dggs/commit/9ab1c90ff441e7edeb97c60a27b5f68cc72d7cd8))
+
 ## [0.2.2](https://github.com/am2222/duckdb-dggs/compare/v0.2.1...v0.2.2) (2026-11-05)
 
 
