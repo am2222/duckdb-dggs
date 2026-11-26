@@ -2,9 +2,21 @@
 
 These functions convert between the sequential cell index (SEQNUM) and alternative hierarchical indexing schemes. Hierarchical indices encode spatial locality, which can improve range queries and spatial sorting.
 
+Which index a grid has depends on its topology and aperture:
+
+| Grid | Index | Functions |
+|------|-------|-----------|
+| `HEXAGON`, aperture 3 | Z3 and ZORDER | `seqnum_to_z3`, `seqnum_to_zorder` |
+| `HEXAGON`, aperture 4 | ZORDER | `seqnum_to_zorder` |
+| `HEXAGON`, aperture 7 | Z7 | `seqnum_to_z7` |
+| `DIAMOND` | ZORDER | `seqnum_to_zorder` |
+| `TRIANGLE` (res 0–29) | QUADTREE | `seqnum_to_quadtree` |
+
+Aperture-sequence grids have no hierarchical index.
+
 ## Z-Order (Morton Code)
 
-Available for aperture 3 and aperture 4 grids.
+Available for aperture 3 and aperture 4 hexagon grids, and for diamond grids (DGGRID 9.3 and later).
 
 ### seqnum_to_zorder
 
@@ -32,6 +44,45 @@ Converts a Z-order index back to a sequential cell index.
 ```sql
 SELECT zorder_to_seqnum(3688448094816436224::UBIGINT, 5);
 -- → 2380
+```
+
+On a diamond grid:
+
+```sql
+SELECT seqnum_to_zorder(100::UBIGINT, 4, dggs_preset('ISEA4D'));
+-- → 1355583487838519296
+```
+
+## QUADTREE Index
+
+Only available for aperture 4 `TRIANGLE` grids, at resolutions 0–29 (added in DGGRID 9.3). The 64-bit value holds the root icosahedron triangle (0–19) in bits 63–59 and then two bits per resolution, coarsest first: `0` is the centre child, `1` the apex child, and `2` and `3` the other corners. Unused low bits are zero.
+
+### seqnum_to_quadtree
+
+```sql
+UBIGINT seqnum_to_quadtree (seqnum UBIGINT, res INTEGER)
+UBIGINT seqnum_to_quadtree (seqnum UBIGINT, res INTEGER, params STRUCT)
+```
+
+Converts a sequential cell index to its QUADTREE index.
+
+```sql
+SELECT seqnum_to_quadtree(100::UBIGINT, 4, dggs_preset('ISEA4T'));
+-- → 547187354725515264
+```
+
+### quadtree_to_seqnum
+
+```sql
+UBIGINT quadtree_to_seqnum (quadtree UBIGINT, res INTEGER)
+UBIGINT quadtree_to_seqnum (quadtree UBIGINT, res INTEGER, params STRUCT)
+```
+
+Converts a QUADTREE index back to a sequential cell index.
+
+```sql
+SELECT quadtree_to_seqnum(547187354725515264::UBIGINT, 4, dggs_preset('ISEA4T'));
+-- → 100
 ```
 
 ## Z3 Index
@@ -104,7 +155,7 @@ SELECT z7_to_seqnum(1162491653815009279::UBIGINT, 4,
 
 ## Index Strings
 
-The text form of the grid's own hierarchical index (Z3 for aperture 3, ZOrder for 4, Z7 for 7): two base-cell digits (`00`–`11`) followed by one digit per resolution. A cell's string starts with its [index parent](/functions/parent-child#seqnum_index_parent)'s, so prefix matching finds descendants. Single-aperture `HEXAGON` grids only.
+The text form of the grid's own hierarchical index (see the table above): two root digits followed by one digit per resolution. The root is the base cell (`00`–`11`) for Z3, Z7 and ZORDER, and the icosahedron triangle (`00`–`19`) for QUADTREE. A cell's string starts with its [index parent](/functions/parent-child#seqnum_index_parent)'s, so prefix matching finds descendants. Not available on aperture-sequence grids.
 
 ### seqnum_to_index_string
 
@@ -114,8 +165,10 @@ VARCHAR seqnum_to_index_string (seqnum UBIGINT, res INTEGER, params STRUCT)
 ```
 
 ```sql
-SELECT seqnum_to_index_string(100::UBIGINT, 4, dggs_preset('ISEA7H'));
--- → 010041
+SELECT seqnum_to_index_string(100::UBIGINT, 4, dggs_preset('ISEA7H')) AS z7,
+       seqnum_to_index_string(100::UBIGINT, 4, dggs_preset('ISEA4D')) AS zorder,
+       seqnum_to_index_string(100::UBIGINT, 4, dggs_preset('ISEA4T')) AS quadtree;
+-- → 010041, 010231, 003303
 ```
 
 ### index_string_to_seqnum

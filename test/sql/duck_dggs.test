@@ -919,9 +919,15 @@ SELECT seqnum_index_parent(5::UBIGINT, 0);
 ----
 already at resolution 0
 
+# DGGRID 9.3: diamond grids index with ZORDER, triangle grids with QUADTREE.
+query II
+SELECT len(seqnum_index_children(5::UBIGINT, 3, dggs_preset('ISEA4D'))),
+       len(seqnum_index_children(5::UBIGINT, 3, dggs_preset('ISEA4T')));
+----
+4	4
+
 statement error
-SELECT seqnum_index_children(5::UBIGINT, 3,
-    dggs_params('ISEA', 4, 'DIAMOND', 0.0, 58.28252559, 11.25));
+SELECT seqnum_index_children(5::UBIGINT, 29, dggs_preset('ISEA4T'));
 ----
 Index hierarchy not available
 
@@ -1469,7 +1475,7 @@ CREATE OR REPLACE TABLE _dggs_functions AS
 SELECT function_name, function_type, parameters, description, examples, categories
 FROM duckdb_functions()
 WHERE function_name SIMILAR TO
-      '(duck_dggs_version|dggs_.*|geo_to_.*|seqnum_.*|q2di_.*|q2dd_.*|projtri_.*|zorder_to_seqnum|z3_to_seqnum|z7_to_seqnum|vertex2dd_to_seqnum|index_string_to_seqnum|igeo7_.*)';
+      '(duck_dggs_version|dggs_.*|geo_.*|seqnum_.*|q2di_.*|q2dd_.*|projtri_.*|zorder_to_seqnum|z3_to_seqnum|z7_to_seqnum|quadtree_to_seqnum|vertex2dd_to_seqnum|index_string_to_seqnum|polygon_to_seqnums|igeo7_.*)';
 
 # Guards against the list above silently matching nothing.
 query I
@@ -1597,3 +1603,135 @@ statement error
 SELECT q2di_to_seqnum(0, 0, 0, 3, dggs_preset('ISEA4D'));
 ----
 quad 0 has no cells in a triangle or diamond grid
+
+# ============================================================
+# DGGRID 9.3: QUADTREE (triangle) and ZORDER (diamond) indexes
+#
+# Expected values are DGGRID's own reference output
+# (examples/sampleOutput/wholeEarthISEA4TSQ and wholeEarthISEA4DSZ,
+# hex labels) for the cell under the listed centre point.
+# ============================================================
+
+query II
+SELECT seqnum_to_quadtree(geo_to_seqnum('POINT(-153.0444730 54.2742458)'::GEOMETRY, 3, dggs_preset('ISEA4TSQ')), 3, dggs_preset('ISEA4TSQ')) = '0x0780000000000000'::UBIGINT,
+       seqnum_to_zorder(geo_to_seqnum('POINT(-161.6557031 59.2668675)'::GEOMETRY, 3, dggs_preset('ISEA4DSZ')), 3, dggs_preset('ISEA4DSZ')) = '0x1000000000000000'::UBIGINT;
+----
+true	true
+
+query III
+SELECT seqnum_to_quadtree(100::UBIGINT, 4, dggs_preset('ISEA4T')),
+       seqnum_to_index_string(100::UBIGINT, 4, dggs_preset('ISEA4T')),
+       seqnum_to_index_string(100::UBIGINT, 4, dggs_preset('ISEA4D'));
+----
+547187354725515264	003303	010231
+
+# Every cell round-trips through its QUADTREE / ZORDER index
+query II
+SELECT bool_and(quadtree_to_seqnum(seqnum_to_quadtree(s::UBIGINT, 3, dggs_preset('ISEA4T')), 3, dggs_preset('ISEA4T')) = s),
+       bool_and(zorder_to_seqnum(seqnum_to_zorder(least(s, 640)::UBIGINT, 3, dggs_preset('ISEA4D')), 3, dggs_preset('ISEA4D')) = least(s, 640))
+FROM range(1, 1281) t(s);
+----
+true	true
+
+# The index children of every res-2 cell partition res 3 exactly, and each
+# child's index string extends its parent's.
+query III
+WITH g(name) AS (VALUES ('ISEA4T'), ('ISEA4D')),
+kids AS (
+  SELECT name, s, unnest(seqnum_index_children(s::UBIGINT, 2, dggs_preset(name))) AS c
+  FROM g, range(1, 321) t(s)
+  WHERE s <= dggs_n_cells(2, dggs_preset(name)))
+SELECT name,
+       count(DISTINCT c) = dggs_n_cells(3, dggs_preset(name)) AND count(*) = count(DISTINCT c),
+       bool_and(seqnum_index_parent(c, 3, dggs_preset(name)) = s
+                AND starts_with(seqnum_to_index_string(c, 3, dggs_preset(name)),
+                                seqnum_to_index_string(s::UBIGINT, 2, dggs_preset(name))))
+FROM kids GROUP BY name ORDER BY name;
+----
+ISEA4D	true	true
+ISEA4T	true	true
+
+# QUADTREE roots run 00-19
+query I
+SELECT index_string_to_seqnum('19', 0, dggs_preset('ISEA4T'));
+----
+20
+
+statement error
+SELECT index_string_to_seqnum('20', 0, dggs_preset('ISEA4T'));
+----
+base cell must be 00-19
+
+statement error
+SELECT seqnum_to_quadtree(1::UBIGINT, 3);
+----
+QUADTREE not available
+
+statement error
+SELECT seqnum_to_quadtree(1::UBIGINT, 30, dggs_preset('ISEA4T'));
+----
+QUADTREE not available
+
+statement error
+SELECT seqnum_to_zorder(1::UBIGINT, 3, dggs_preset('ISEA7H'));
+----
+ZORDER not available
+
+# DGGRID 9.3 presets: Q (QUADTREE) suffix and spherical FULLER aliases
+query IIII
+SELECT dggs_preset('ISEA4TSQ') = dggs_preset('ISEA4T'),
+       dggs_preset('IVEA4TLQ') = dggs_preset('IVEA4TL'),
+       dggs_preset('FULLER4TQ') = dggs_preset('FULLER4T'),
+       dggs_preset('FULLER7HS') = dggs_preset('FULLER7H');
+----
+true	true	true	true
+
+# ============================================================
+# DGGRID 9.3: WGS84 geodesics
+#
+# Reference values from GeographicLib (pyproj 3.7 Geod('WGS84')).
+# ============================================================
+
+query III
+SELECT round(geo_distance_km('POINT(-75.7 45.4)'::GEOMETRY, 'POINT(-0.1 51.5)'::GEOMETRY, 'WGS84'), 6),
+       round(geo_azimuth_deg('POINT(-75.7 45.4)'::GEOMETRY, 'POINT(-0.1 51.5)'::GEOMETRY, 'WGS84'), 6),
+       round(geo_distance_km('POINT(-75.7 45.4)'::GEOMETRY, 'POINT(-0.1 51.5)'::GEOMETRY, 'AUTHALIC_SPHERE'), 6)
+         = round(geo_distance_km('POINT(-75.7 45.4)'::GEOMETRY, 'POINT(-0.1 51.5)'::GEOMETRY), 6);
+----
+5380.44042	53.938693	true
+
+# A quarter meridian on WGS84
+query I
+SELECT round(geo_distance_km('POINT(0 0)'::GEOMETRY, 'POINT(0 90)'::GEOMETRY, 'WGS84'), 6);
+----
+10001.965729
+
+# geo_destination inverts the inverse problem on both datums
+query II
+WITH p AS (SELECT 'POINT(-75.7 45.4)'::GEOMETRY a, 'POINT(-0.1 51.5)'::GEOMETRY b)
+SELECT geo_distance_km(geo_destination(a, geo_azimuth_deg(a, b, 'WGS84'), geo_distance_km(a, b, 'WGS84'), 'WGS84'), b, 'WGS84') < 1e-9,
+       geo_distance_km(geo_destination(a, geo_azimuth_deg(a, b), geo_distance_km(a, b)), b) < 1e-9
+FROM p;
+----
+true	true
+
+query I
+SELECT geo_destination('POINT(0 0)'::GEOMETRY, 90.0, NULL);
+----
+NULL
+
+statement error
+SELECT geo_distance_km('POINT(0 0)'::GEOMETRY, 'POINT(1 0)'::GEOMETRY, 'NAD27');
+----
+Unknown datum 'NAD27'
+
+# On a WGS84 grid, cell area is measured with geodesic edges on the
+# ellipsoid; it stays within 1e-6 of the authalic-sphere area, and the
+# whole grid still sums to the ellipsoid's area.
+query II
+SELECT abs(seqnum_cell_area_km(2380::UBIGINT, 5, dggs_preset('ISEA4HL'))
+           / seqnum_cell_area_km(2380::UBIGINT, 5, dggs_preset('ISEA4HS')) - 1) < 1e-6,
+       abs(sum(seqnum_cell_area_km(s::UBIGINT, 3, dggs_preset('ISEA4HL'))) / 510065621.7240886 - 1) < 1e-9
+FROM range(1, 643) t(s);
+----
+true	true

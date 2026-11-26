@@ -75,7 +75,7 @@ SELECT geo_to_seqnum('POINT(10 45)'::GEOMETRY, 9, dggs_preset('IGEO7v2'));
 | `IGEO7v1` | `ISEA7HS`: IGEO7 on the authalic sphere (DGGRID's `IGEO7` before v9.1). |
 | `IGEO7v2`, `IGEO7` | `ISEA7HL`: IGEO7 with WGS84 lon/lat. |
 
-Names are case-insensitive, and a trailing `Z` (DGGRID's hierarchically indexed variants, e.g. `ISEA7HSZ`) is accepted: the index functions work on every single-aperture hexagon grid anyway. `FULLER` presets use the DYMAXION orientation. The ISEA presets use the exact pole latitude `atan(φ)` = 58.2825255885…°, so they can differ from the rounded `58.28252559` used elsewhere in these docs for points that sit exactly on a cell edge.
+Names are case-insensitive. A trailing `Z` or `Q` (DGGRID's hierarchically indexed variants, e.g. `ISEA7HSZ`, `ISEA4DSZ`, or the QUADTREE presets `ISEA4TSQ` and `FULLER4TQ` added in DGGRID 9.3) is accepted and gives the same grid. The index functions pick the grid's own index anyway: Z3, Z7 or ZORDER for hexagons, ZORDER for diamonds and QUADTREE for triangles. DGGRID 9.3's spherical aliases such as `FULLER4HS` work the same way. `FULLER` presets use the DYMAXION orientation. The ISEA presets use the exact pole latitude `atan(φ)` = 58.2825255885…°, so they can differ from the rounded `58.28252559` used elsewhere in these docs for points that sit exactly on a cell edge.
 
 ## Datum
 

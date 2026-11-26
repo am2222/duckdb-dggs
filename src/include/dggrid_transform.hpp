@@ -92,6 +92,10 @@ struct Z3Coord {
   uint64_t value = 0;
 };
 
+struct QuadtreeCoord {
+  uint64_t value = 0;
+};
+
 struct Z7Coord {
   uint64_t value = 0;
 };
@@ -214,6 +218,10 @@ SeqNum vertex2DDToSeqNum(const DggsParams &p, bool keep, int vertNum,
 ZOrderCoord seqNumToZOrder(const DggsParams &p, SeqNum seqnum);
 SeqNum zOrderToSeqNum(const DggsParams &p, uint64_t value);
 
+// QUADTREE (DGGRID 9.3): aperture 4 triangle grids, resolutions 0-29.
+QuadtreeCoord seqNumToQuadtree(const DggsParams &p, SeqNum seqnum);
+SeqNum quadtreeToSeqNum(const DggsParams &p, uint64_t value);
+
 Z3Coord seqNumToZ3(const DggsParams &p, SeqNum seqnum);
 SeqNum z3ToSeqNum(const DggsParams &p, uint64_t value);
 
@@ -221,8 +229,9 @@ Z7Coord seqNumToZ7(const DggsParams &p, SeqNum seqnum);
 SeqNum z7ToSeqNum(const DggsParams &p, uint64_t value);
 
 // ===========================================================================
-// Index hierarchy — parent / children under the grid's Z3 (aperture 3),
-// ZOrder (aperture 4) or Z7 (aperture 7) indexing system.  Unlike the
+// Index hierarchy — parent / children under the grid's indexing system: Z3
+// (aperture 3 hexagons), ZOrder (aperture 4 hexagons and diamonds), Z7
+// (aperture 7 hexagons) or Quadtree (triangles).  Unlike the
 // spatial seqNumParent / seqNumChildren, every cell has exactly one index
 // parent and the index children of distinct cells never overlap.
 // ===========================================================================
@@ -246,8 +255,8 @@ std::vector<SeqNum> seqNumKRing(const DggsParams &p, SeqNum seqnum, int k);
 // Geodesy
 // ===========================================================================
 
-// True area (km²) of one cell, on the WGS84 authalic sphere (and so also on
-// the WGS84 ellipsoid, which that sphere maps onto equal-area).
+// True area (km²) of one cell: on the authalic sphere for an AUTHALIC_SPHERE
+// grid, and with WGS84 geodesic edges on the ellipsoid for a WGS84 grid.
 double seqNumCellAreaKM(const DggsParams &p, SeqNum seqnum);
 
 // Great-circle distance (km) on the WGS84 authalic sphere.
@@ -256,6 +265,18 @@ double geoDistanceKM(double lon1, double lat1, double lon2, double lat2);
 // Initial great-circle bearing from point 1 to point 2, degrees clockwise
 // from north in [0, 360).
 double geoAzimuthDeg(double lon1, double lat1, double lon2, double lat2);
+
+// The same on a datum: AUTHALIC_SPHERE (as above) or WGS84 (ellipsoidal
+// geodesic between geodetic coordinates, DGGRID 9.3's DgGeodesic).
+double geoDistanceKM(double lon1, double lat1, double lon2, double lat2,
+                     const std::string &datum);
+double geoAzimuthDeg(double lon1, double lat1, double lon2, double lat2,
+                     const std::string &datum);
+
+// The point reached by travelling distance_km from (lon, lat) along the
+// initial bearing azimuth_deg, along a geodesic of the datum.
+GeoCoord geoDestination(double lon, double lat, double azimuth_deg,
+                        double distance_km, const std::string &datum);
 
 // ===========================================================================
 // Polygon coverage
