@@ -1300,8 +1300,8 @@ std::vector<SeqNum> seqNumAllParents(const DggsParams &p, SeqNum seqnum) {
       }();
 
       auto addPoint = [&](long double x, long double y) {
-        others.insert(parentOfQ2DDPoint(*t, parent_dgg, q2di.quadNum(),
-                                        DgDVec2D(x, y)));
+        others.insert(
+            parentOfQ2DDPoint(*t, parent_dgg, q2di.quadNum(), DgDVec2D(x, y)));
       };
       auto addSample = [&](const DgDVec2D &v) {
         // Inside the cell, towards the centre.
