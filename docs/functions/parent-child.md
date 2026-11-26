@@ -40,14 +40,22 @@ UBIGINT[] seqnum_all_parents (seqnum UBIGINT, res INTEGER, params STRUCT)
 
 ### Description
 
-Returns the sequential indices of **all** parent cells at resolution `res - 1` that touch the given cell. Interior cells typically have 1 parent; cells on a parent-cell boundary may touch 2 or 3 parents. The primary (containing) parent is always the first element.
+Returns the sequential indices of the parent cells at resolution `res - 1` that **share area** with the given cell: the containing parent (`seqnum_parent`) first, then the others in ascending order. An interior cell has 1 parent; a cell that straddles a parent boundary has 2 or 3.
 
 This is useful for identifying boundary cells that belong to multiple parent regions.
+
+::: warning Changed in 0.3.0
+Earlier versions also returned parents that only touch the cell at a corner, and which of those were returned depended on the platform. They also listed the parents in no fixed order. From 0.3.0 the result is the containing parent first, then the other area-sharing parents in ascending order. For example, cell 2412 at res 5 was `[599, 616, 615]` or `[599, 598, 615]` and is now `[599, 615]`.
+:::
+
+::: info Why not cells that only touch at a corner?
+In aperture 3, 4 and 7 hexagon grids a cell's corner can sit exactly on a parent's edge or corner. Cell 2412 at res 5 shares about half its area with each of 599 and 615, and touches 598 and 616 at a single point each. Deciding whether such a point belongs to a parent is a floating-point tie, and it gave different answers on different platforms (native and WASM). So parents that only touch the cell at a point are excluded, and the points used to find the parents are moved slightly inside the cell, which gives the same result everywhere.
+:::
 
 ### Example
 
 ```sql
--- Cell 2412 sits on a parent boundary, touching 3 parents
+-- Cell 2412 straddles two parents
 SELECT seqnum_all_parents(2412::UBIGINT, 5);
 ```
 ```
@@ -55,7 +63,7 @@ SELECT seqnum_all_parents(2412::UBIGINT, 5);
 │ seqnum_all_parents(CAST(2412 AS "UBIGINT"), 5) │
 │                    uint64[]                    │
 ├────────────────────────────────────────────────┤
-│ [599, 616, 615]                                │
+│ [599, 615]                                     │
 └────────────────────────────────────────────────┘
 ```
 

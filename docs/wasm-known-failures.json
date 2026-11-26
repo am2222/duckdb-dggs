@@ -1,6 +1,1 @@
-[
-  {
-    "id": "functions/parent-child#seqnum_all_parents/1",
-    "reason": "WASM bug: seqnum_all_parents(2412, 5) returns [599,598,615] on WASM but [599, 616, 615] on native osx_arm64 (same commit)"
-  }
-]
+[]

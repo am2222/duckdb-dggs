@@ -11,6 +11,7 @@ Run against the CI `duck_dggs-v2.0.0-extension-wasm_eh` artifact of run 42128558
 
 ## WASM bug
 - `functions/parent-child#seqnum_all_parents/1`: WASM returns `[599,598,615]`, native `[599, 616, 615]` (598 vs 616 is a different cell, not formatting). Listed in known failures.
+  - **Resolved (Task 10, 0.3.0):** 2412 shares area only with 599 and 615 and touches 598 and 616 at a single point each; which corner-touching parent dglib's `setParents` reported was a floating-point tie. `seqnum_all_parents` now returns only area-sharing parents (samples moved slightly inside the cell), containing parent first and the rest ascending: `[599, 615]` on every platform. Doc example updated, known-failure entry removed.
 
 ## norun / run
 - `functions/utility#duck_dggs_version/1`: fence marked `sql run` (shown, not compared) because the version string changes every release.

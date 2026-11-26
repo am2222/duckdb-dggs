@@ -537,6 +537,63 @@ SELECT seqnum_all_parents(2380::UBIGINT, 5)
 ----
 true
 
+# Only parents that share area with the cell: 2412 straddles 599 and 615
+# (about 50/50) and touches 598 and 616 at a single point each, which are not
+# parents. Containing parent first, the rest ascending. Same on every platform.
+query I
+SELECT seqnum_all_parents(2412::UBIGINT, 5);
+----
+[599, 615]
+
+query I
+SELECT seqnum_all_parents(2380::UBIGINT, 5);
+----
+[599]
+
+query I
+SELECT (seqnum_all_parents(2412::UBIGINT, 5))[1] = seqnum_parent(2412::UBIGINT, 5);
+----
+true
+
+# A sample of 201 cells: 1 to 3 parents, the containing parent first, the
+# rest in ascending order without duplicates
+query I
+SELECT bool_and(len(l) BETWEEN 1 AND 3
+            AND l[1] = p
+            AND list_sort(list_slice(l, 2, len(l))) = list_slice(l, 2, len(l))
+            AND len(list_distinct(l)) = len(l))
+FROM (SELECT seqnum_all_parents(c::UBIGINT, 5) AS l, seqnum_parent(c::UBIGINT, 5) AS p
+      FROM range(0, 10242, 51) t(c));
+----
+true
+
+# Aperture 7 and aperture 3: containing parent first, at least one parent
+query I
+SELECT bool_and(len(l) >= 1 AND l[1] = p AND len(list_distinct(l)) = len(l))
+FROM (SELECT seqnum_all_parents(c::UBIGINT, 4, dggs_params('ISEA', 7, 'HEXAGON', 0.0, 58.28252559, 11.25)) AS l,
+             seqnum_parent(c::UBIGINT, 4, dggs_params('ISEA', 7, 'HEXAGON', 0.0, 58.28252559, 11.25)) AS p
+      FROM (VALUES (100), (500), (1234)) t(c));
+----
+true
+
+query I
+SELECT bool_and(len(l) >= 1 AND l[1] = p AND len(list_distinct(l)) = len(l))
+FROM (SELECT seqnum_all_parents(c::UBIGINT, 4, dggs_params('ISEA', 3, 'HEXAGON', 0.0, 58.28252559, 11.25)) AS l,
+             seqnum_parent(c::UBIGINT, 4, dggs_params('ISEA', 3, 'HEXAGON', 0.0, 58.28252559, 11.25)) AS p
+      FROM (VALUES (100), (300), (500)) t(c));
+----
+true
+
+# Mixed aperture 4/3 sequence: no crash, containing parent first, tail ascending
+query I
+SELECT bool_and(len(l) >= 1 AND l[1] = p
+            AND list_sort(list_slice(l, 2, len(l))) = list_slice(l, 2, len(l)))
+FROM (SELECT seqnum_all_parents(c::UBIGINT, 3, dggs_params('ISEA', 4, 'HEXAGON', 0.0, 58.28252559, 11.25, true, '4343')) AS l,
+             seqnum_parent(c::UBIGINT, 3, dggs_params('ISEA', 4, 'HEXAGON', 0.0, 58.28252559, 11.25, true, '4343')) AS p
+      FROM range(0, 162) t(c));
+----
+true
+
 # ============================================================
 # Vertex2DD — seqnum_to_vertex2dd, vertex2dd_to_seqnum
 # ============================================================
