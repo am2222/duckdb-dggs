@@ -25,7 +25,7 @@ Add a job after the build in the workflow that calls `_extension_distribution.ym
       - uses: am2222/duckdb-dggs/.github/actions/wasm-sqllogictest@main
         with:
           extension: my_extension
-          artifact: my_extension-v2.0.0-extension-wasm_eh
+          artifact: my_extension-v2.0.1-extension-wasm_eh
 ```
 
 The artifact is named `<extension>-<duckdb_version>-extension-wasm_eh` by
@@ -44,7 +44,7 @@ runner to stay fixed.
 | `published` | `false` | Report doc examples using functions the engine lacks as `unreleased` instead of failing. |
 | `extension-source` | file path | Text shown in the summary as the build under test (e.g. a download URL). Display only. |
 | `engine-package` | `@duckdb/duckdb-wasm` | npm engine package. |
-| `engine-version` | `1.33.1-dev119.0` | DuckDB v2.0.0 build. Must match the DuckDB version the extension was built for. |
+| `engine-version` | `1.33.1-dev124.0` | DuckDB v2.0.1 build. Must match the DuckDB version the extension was built for. |
 | `bundle` | first available | The 2.x engines (the official `@duckdb/duckdb-wasm` 1.33.x dev builds and others) ship one `base` bundle; `eh` / `mvp` are DuckDB 1.x builds. |
 | `repositories` | `https://extensions.duckdb.org` | Tried, after the engine's own, for other required extensions. |
 | `timeout` | `600` | Seconds per test file. |
@@ -80,7 +80,7 @@ docs: examples that call missing functions become `unreleased`, not failures.
 ## Run locally
 
 ```sh
-cd .github/actions/wasm-sqllogictest && npm install --no-save web-worker@1.2.0 @duckdb/duckdb-wasm@1.33.1-dev119.0 && cd -
+cd .github/actions/wasm-sqllogictest && npm install --no-save web-worker@1.2.0 @duckdb/duckdb-wasm@1.33.1-dev124.0 && cd -
 node .github/actions/wasm-sqllogictest/run.mjs \
   --extension my_extension \
   --extension-file path/to/my_extension.duckdb_extension.wasm \
@@ -88,7 +88,7 @@ node .github/actions/wasm-sqllogictest/run.mjs \
   --docs docs --known-failures docs/wasm-known-failures.json
 ```
 
-To test a CI build: `gh run download <run-id> -n my_extension-v2.0.0-extension-wasm_eh -D wasm`.
+To test a CI build: `gh run download <run-id> -n my_extension-v2.0.1-extension-wasm_eh -D wasm`.
 
 ## Supported sqllogictest features
 

@@ -38,7 +38,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  PUBLISHED_URL: https://community-extensions.duckdb.org/v2.0.0/wasm_eh/duck_dggs.duckdb_extension.wasm
+  PUBLISHED_URL: https://community-extensions.duckdb.org/v2.0.1/wasm_eh/duck_dggs.duckdb_extension.wasm
 
 jobs:
   test-deployed-wasm:

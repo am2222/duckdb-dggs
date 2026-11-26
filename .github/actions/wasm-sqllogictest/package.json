@@ -6,7 +6,7 @@
   "description": "Runs a DuckDB extension's sqllogictest files against its WASM build in Node.",
   "bin": { "wasm-sqllogictest": "run.mjs" },
   "dependencies": {
-    "@duckdb/duckdb-wasm": "1.33.1-dev119.0",
+    "@duckdb/duckdb-wasm": "1.33.1-dev124.0",
     "web-worker": "1.2.0"
   },
   "engines": { "node": ">=20" }

@@ -14,8 +14,8 @@ include extension-ci-tools/makefiles/duckdb_extension.Makefile
 #   make test_wasm        the PUBLISHED community-extensions build
 #   make test_wasm_local  the build from `make wasm_eh` (EXT_FILE=... to override)
 WASM_ACTION := .github/actions/wasm-sqllogictest
-WASM_ENGINE := @duckdb/duckdb-wasm@1.33.1-dev119.0
-PUBLISHED_WASM_URL := https://community-extensions.duckdb.org/v2.0.0/wasm_eh/duck_dggs.duckdb_extension.wasm
+WASM_ENGINE := @duckdb/duckdb-wasm@1.33.1-dev124.0
+PUBLISHED_WASM_URL := https://community-extensions.duckdb.org/v2.0.1/wasm_eh/duck_dggs.duckdb_extension.wasm
 PUBLISHED_WASM := build/wasm-published/duck_dggs.duckdb_extension.wasm
 EXT_FILE ?= build/wasm_eh/extension/duck_dggs/duck_dggs.duckdb_extension.wasm
 WASM_RUN := node $(WASM_ACTION)/run.mjs --extension $(EXT_NAME) --tests test/sql --docs docs \

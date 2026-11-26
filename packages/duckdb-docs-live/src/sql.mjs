@@ -37,7 +37,9 @@ export function rowsOf(table) {
 // DESCRIBE, multiple statements, ...) falls back to rendering in JavaScript.
 export async function runQuery(conn, sql) {
   const body = stripSemicolon(sql);
-  if (/^\s*(select|with|from|values|table|\()/i.test(body)) {
+  // Skip leading `--` and `/* */` comments: doc examples often start with one.
+  const lead = body.replace(/^(?:\s+|--[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/)*/, '');
+  if (/^(select|with|from|values|table|\()/i.test(lead)) {
     try {
       return rowsOf(await conn.query(`SELECT COLUMNS(*)::VARCHAR FROM (${body}\n) AS __sqllogictest`));
     } catch (e) {

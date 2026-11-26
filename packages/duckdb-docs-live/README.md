@@ -12,7 +12,7 @@ that run the same examples against the WASM build.
 - `.github/actions/wasm-sqllogictest` (this repo) runs the same examples, and
   your sqllogictest files, in Node against a built `.wasm` file.
 
-Engine: official `@duckdb/duckdb-wasm@1.33.1-dev119.0` (DuckDB v2.0.0). The
+Engine: official `@duckdb/duckdb-wasm@1.33.1-dev124.0` (DuckDB v2.0.1). The
 extension must be the build for the same DuckDB version.
 
 ## Fences
@@ -38,7 +38,7 @@ duckdb-dggs.
    ```json
    "dependencies": {
      "duckdb-docs-live": "file:../packages/duckdb-docs-live",
-     "@duckdb/duckdb-wasm": "1.33.1-dev119.0"
+     "@duckdb/duckdb-wasm": "1.33.1-dev124.0"
    }
    ```
 
@@ -68,7 +68,7 @@ duckdb-dggs.
    ```ts
    export default {
      extension: 'duck_dggs',
-     engineVersion: '1.33.1-dev119.0',
+     engineVersion: '1.33.1-dev124.0',
      repositories: ['https://extensions.duckdb.org'],   // for `LOAD spatial` etc.
    }
    ```
@@ -131,13 +131,13 @@ duckdb-dggs.
    - uses: am2222/duckdb-dggs/.github/actions/wasm-sqllogictest@main
      with:
        extension: my_extension
-       artifact: my_extension-v2.0.0-extension-wasm_eh   # or extension-file: path/to.wasm
+       artifact: my_extension-v2.0.1-extension-wasm_eh   # or extension-file: path/to.wasm
        tests: test/sql                                    # '' for docs only
        docs: docs
        known-failures: docs/wasm-known-failures.json
        # for a published build that may lag the docs:
        # published: 'true'
-       # extension-source: https://community-extensions.duckdb.org/v2.0.0/wasm_eh/my_extension.duckdb_extension.wasm
+       # extension-source: https://community-extensions.duckdb.org/v2.0.1/wasm_eh/my_extension.duckdb_extension.wasm
    ```
 
    The job fails on any `differs` or `error`, on a known-failures problem, or

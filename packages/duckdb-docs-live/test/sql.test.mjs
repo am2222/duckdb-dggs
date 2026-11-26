@@ -43,6 +43,14 @@ test('runQuery wraps SELECT and returns names', async () => {
   assert.deepEqual(r, { cols: 1, names: ['a'], rows: [['1']] });
 });
 
+test('runQuery wraps a SELECT that starts with comments', async () => {
+  for (const sql of ['-- note\nSELECT 1', '/* a */ -- b\n  SELECT 1']) {
+    const conn = fakeConn();
+    await runQuery(conn, sql);
+    assert.ok(conn.seen[0].startsWith('SELECT COLUMNS(*)::VARCHAR FROM ('), sql);
+  }
+});
+
 test('runQuery does not wrap PRAGMA', async () => {
   const conn = fakeConn();
   await runQuery(conn, 'PRAGMA version');

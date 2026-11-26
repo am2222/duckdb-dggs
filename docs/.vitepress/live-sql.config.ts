@@ -2,6 +2,6 @@
 // DuckDB-WASM, and where extra extensions (spatial) come from.
 export default {
   extension: 'duck_dggs',
-  engineVersion: '1.33.1-dev119.0',
+  engineVersion: '1.33.1-dev124.0',
   repositories: ['https://extensions.duckdb.org'],
 }

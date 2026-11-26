@@ -38,7 +38,7 @@ make test_wasm         # the PUBLISHED build (community-extensions), test/sql + 
 make test_wasm_local   # the build from `make wasm_eh` (EXT_FILE=<path> to override)
 ```
 
-Both install the engine (`@duckdb/duckdb-wasm@1.33.1-dev119.0`, DuckDB v2.0.0)
+Both install the engine (`@duckdb/duckdb-wasm@1.33.1-dev124.0`, DuckDB v2.0.1)
 into the action directory and run its `run.mjs`; neither builds anything.
 `test_wasm` downloads the published file to `build/wasm-published/` and passes
 `--published`, so examples that use functions the published build lacks are

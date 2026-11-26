@@ -16,7 +16,7 @@ inputs:
   artifact:
     description: >
       Name of an artifact of this workflow run holding the `.wasm` file, e.g.
-      `<name>-v2.0.0-extension-wasm_eh` from extension-ci-tools'
+      `<name>-v2.0.1-extension-wasm_eh` from extension-ci-tools'
       `_extension_distribution.yml`.
     required: false
     default: ''
@@ -62,7 +62,7 @@ inputs:
       Version of `engine-package`. It must be built from the same DuckDB
       version as the extension.
     required: false
-    default: 1.33.1-dev119.0
+    default: 1.33.1-dev124.0
   bundle:
     description: >
       Engine bundle. The 2.x engines (the official @duckdb/duckdb-wasm
