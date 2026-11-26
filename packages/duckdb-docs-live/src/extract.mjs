@@ -14,7 +14,9 @@ function scanQuotes(line, inQuote) {
 
 const isArrow = (l) => /^--\s*→/.test(l);
 
-function splitStatements(lines) {
+// Splits fence lines into statements (quote-aware; `-- →` lines become the
+// previous statement's expected value).
+export function splitStatements(lines) {
   const statements = [];
   let cur = [];
   let inQuote = false;
@@ -47,6 +49,11 @@ function splitStatements(lines) {
   }
   flush();
   return statements;
+}
+
+// Extensions an example needs installed first (it LOADs them itself).
+export function detectNeeds(statements) {
+  return statements.some((s) => /\bLOAD\s+spatial\b/i.test(s.sql)) ? ['spatial'] : [];
 }
 
 export function extractExamples(markdown, page) {
@@ -123,9 +130,7 @@ export function extractExamples(markdown, page) {
         line: fenceLine,
         mode,
         statements,
-        needs: statements.some((s) => /\bLOAD\s+spatial\b/i.test(s.sql))
-          ? ['spatial']
-          : [],
+        needs: detectNeeds(statements),
       });
     }
     i = nextI;

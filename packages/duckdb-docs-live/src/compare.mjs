@@ -8,6 +8,7 @@ const normalise = (s) =>
   String(s)
     .replace(/(['"])(\w+)\1\s*:/g, '$2:')
     .replace(/\s+/g, ' ')
+    .replace(/,\s*/g, ', ')
     .trim();
 
 // Split expected text into literal text, number and wildcard parts.
@@ -27,6 +28,9 @@ function tokenise(expected) {
 }
 
 function numberMatches(exp, act) {
+  const isInt = (v) => /^[-+]?\d+$/.test(v);
+  const canon = (v) => v.replace(/^\+/, '').replace(/^-(0+)$/, '$1');
+  if (isInt(exp) && isInt(act)) return canon(exp) === canon(act);
   if (numericallyEqual(exp, act)) return true;
   const mant = exp.split(/e/i)[0];
   const dot = mant.indexOf('.');
@@ -38,8 +42,11 @@ function numberMatches(exp, act) {
 }
 
 export function cellsMatch(expected, actual) {
-  const parts = tokenise(normalise(expected));
+  let exp = normalise(expected);
   const act = normalise(actual);
+  // DuckDB renders VARCHAR values unquoted; docs quote them per value.
+  if (!act.includes("'")) exp = exp.replace(/'([^']*)'/g, '$1');
+  const parts = tokenise(exp);
   const numRe = new RegExp(NUM_SRC, 'iy');
   const go = (pi, pos) => {
     if (pi === parts.length) return pos === act.length;

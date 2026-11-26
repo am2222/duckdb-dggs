@@ -49,6 +49,8 @@ jobs:
         with:
           extension: duck_dggs
           artifact: duck_dggs-v2.0.0-extension-wasm_eh
+          docs: docs/**/*.md
+          known-failures: docs/wasm-known-failures.json
 
   release:
     name: Publish release

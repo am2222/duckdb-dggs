@@ -14,7 +14,7 @@ Returns the version string of the loaded duck_dggs extension together with the v
 
 ### Example
 
-```sql
+```sql run
 SELECT duck_dggs_version();
 ```
 ```

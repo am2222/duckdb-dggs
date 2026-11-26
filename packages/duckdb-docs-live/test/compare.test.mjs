@@ -125,4 +125,32 @@ test('cellsMatch basics', () => {
   assert.equal(cellsMatch('a  b', 'a b'), true);
   assert.equal(cellsMatch('5', '5.2'), false);
   assert.equal(cellsMatch('abc', 'abd'), false);
+  assert.equal(cellsMatch('[2380, 2381, 2412, 2413]', '[2380,2381,2412,2413]'), true);
+  assert.equal(cellsMatch('[1,2]', '[1, 3]'), false);
+});
+
+test('quoted-string expected vs unquoted actual', () => {
+  assert.equal(cellsMatch("'08004'", '08004'), true);
+  assert.equal(cellsMatch("'2'", '2'), true);
+  assert.equal(cellsMatch("'0-0.1.6.1'", '0-0.1.6.1'), true);
+  assert.equal(cellsMatch("'2'", '3'), false);
+});
+
+test('large integers compare exactly', () => {
+  assert.equal(cellsMatch('2994893752201379839', '2994893752201379838'), false);
+  assert.equal(cellsMatch('2994893752201379839', '2994893752201379000'), false);
+  assert.equal(cellsMatch('2994893752201379839', '2994893752201379839'), true);
+  assert.equal(cellsMatch('10242', '10242'), true);
+});
+
+test('per-value quote stripping', () => {
+  assert.equal(cellsMatch("'08004', 2", '08004, 2'), true);
+  assert.equal(cellsMatch("'a', 1", 'a, 1'), true);
+  assert.equal(cellsMatch("['a', 'b']", '[a, b]'), true);
+  assert.equal(cellsMatch("'2'", '3'), false);
+});
+
+test('negative zero integer', () => {
+  assert.equal(cellsMatch('-0', '0'), true);
+  assert.equal(cellsMatch('0', '0.0'), true);
 });

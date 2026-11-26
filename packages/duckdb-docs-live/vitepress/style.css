@@ -1,0 +1,278 @@
+/* LiveSql: uses VitePress theme variables, so it follows light and dark mode. */
+
+.live-sql {
+  margin: 16px 0;
+}
+
+/* Once the SQL is editable, the textarea replaces the rendered SQL block;
+   the documented output block stays. */
+.live-sql.is-active > .live-sql-slot > div[class*='language-']:first-child {
+  display: none;
+}
+
+.live-sql-slot > div[class*='language-'] {
+  margin: 0 0 8px;
+}
+
+.live-sql-editor {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 3em;
+  margin: 0 0 8px;
+  padding: 20px 24px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 8px;
+  background-color: var(--vp-code-block-bg);
+  color: var(--vp-code-block-color, var(--vp-c-text-1));
+  font-family: var(--vp-font-family-mono);
+  font-size: var(--vp-code-font-size);
+  line-height: var(--vp-code-line-height);
+  white-space: pre;
+  overflow-x: auto;
+  overflow-y: hidden;
+  resize: vertical;
+  tab-size: 2;
+}
+
+.live-sql-editor:focus {
+  outline: none;
+  border-color: var(--vp-c-brand-1);
+}
+
+.live-sql-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  font-size: 14px;
+}
+
+.live-sql-btn {
+  padding: 2px 12px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 6px;
+  background: var(--vp-c-bg-soft);
+  color: var(--vp-c-text-1);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 26px;
+  cursor: pointer;
+  transition: border-color 0.2s, background-color 0.2s;
+}
+
+.live-sql-btn:hover:not(:disabled) {
+  border-color: var(--vp-c-brand-1);
+}
+
+.live-sql-btn.primary {
+  border-color: var(--vp-button-brand-border, var(--vp-c-brand-1));
+  background: var(--vp-button-brand-bg, var(--vp-c-brand-3));
+  color: var(--vp-button-brand-text, #fff);
+}
+
+.live-sql-btn.primary:hover:not(:disabled) {
+  background: var(--vp-button-brand-hover-bg, var(--vp-c-brand-2));
+}
+
+.live-sql-btn:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+.live-sql-badge {
+  padding: 0 10px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 24px;
+  white-space: nowrap;
+}
+
+.live-sql-badge.ok {
+  background: var(--vp-c-success-soft);
+  color: var(--vp-c-success-1);
+}
+
+.live-sql-badge.bad {
+  background: var(--vp-c-danger-soft);
+  color: var(--vp-c-danger-1);
+}
+
+.live-sql-badge.muted {
+  background: var(--vp-c-default-soft);
+  color: var(--vp-c-text-2);
+}
+
+.live-sql-timing {
+  color: var(--vp-c-text-3);
+  font-size: 13px;
+}
+
+.live-sql-result {
+  margin-top: 8px;
+  min-width: 0;
+}
+
+.live-sql-detail {
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--vp-c-default-soft);
+  color: var(--vp-c-text-1);
+  font-family: var(--vp-font-family-mono);
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.live-sql-detail.error,
+.live-sql-detail.differs {
+  background: var(--vp-c-danger-soft);
+}
+
+.live-sql-table-block + .live-sql-table-block {
+  margin-top: 12px;
+}
+
+.live-sql-table-sql {
+  margin-bottom: 4px;
+  overflow: hidden;
+  color: var(--vp-c-text-2);
+  font-family: var(--vp-font-family-mono);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The table scrolls inside its own box, never the page. */
+.live-sql-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 8px;
+  background: var(--vp-code-block-bg);
+}
+
+.vp-doc .live-sql-table,
+.live-sql-table {
+  display: table;
+  width: max-content;
+  min-width: 100%;
+  margin: 0;
+  border-collapse: collapse;
+  overflow: visible;
+  font-family: var(--vp-font-family-mono);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.vp-doc .live-sql-table tr,
+.live-sql-table tr {
+  border: 0;
+  background: transparent;
+}
+
+.vp-doc .live-sql-table th,
+.vp-doc .live-sql-table td,
+.live-sql-table th,
+.live-sql-table td {
+  padding: 4px 12px;
+  border: 0;
+  border-right: 1px solid var(--vp-c-divider);
+  color: var(--vp-c-text-1);
+  text-align: left;
+  white-space: pre;
+}
+
+.vp-doc .live-sql-table th:last-child,
+.vp-doc .live-sql-table td:last-child {
+  border-right: 0;
+}
+
+.vp-doc .live-sql-table th,
+.live-sql-table th {
+  border-bottom: 1px solid var(--vp-c-divider);
+  background: var(--vp-c-default-soft);
+  font-weight: 600;
+}
+
+.vp-doc .live-sql-table td.num,
+.live-sql-table td.num {
+  text-align: right;
+}
+
+.vp-doc .live-sql-table td.empty,
+.live-sql-table td.empty {
+  color: var(--vp-c-text-3);
+  font-style: italic;
+}
+
+.live-sql-more {
+  margin-top: 4px;
+  color: var(--vp-c-text-3);
+  font-size: 12px;
+}
+
+.live-sql-banner {
+  position: fixed;
+  z-index: 100;
+  top: calc(var(--vp-nav-height, 64px) + 8px);
+  left: 50%;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  box-sizing: border-box;
+  width: min(720px, calc(100vw - 32px));
+  padding: 10px 14px;
+  border: 1px solid var(--vp-c-danger-1);
+  border-radius: 8px;
+  background: var(--vp-c-bg);
+  box-shadow: var(--vp-shadow-3);
+  color: var(--vp-c-danger-1);
+  font-size: 14px;
+  transform: translateX(-50%);
+  word-break: break-word;
+}
+
+.live-sql-banner span {
+  flex: 1;
+}
+
+.live-sql-banner button {
+  border: 0;
+  background: none;
+  color: var(--vp-c-text-2);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* A ?build= / #build= override is active: always visible, until the reader
+   leaves it with [Use published]. */
+.live-sql-build-notice {
+  position: fixed;
+  z-index: 100;
+  bottom: 16px;
+  left: 50%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  box-sizing: border-box;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  padding: 8px 12px;
+  border: 1px solid var(--vp-c-warning-1);
+  border-radius: 8px;
+  background: var(--vp-c-bg);
+  box-shadow: var(--vp-shadow-3);
+  color: var(--vp-c-text-1);
+  font-size: 14px;
+  transform: translateX(-50%);
+  word-break: break-all;
+}
+
+.live-sql-build-notice code {
+  font-size: 13px;
+}

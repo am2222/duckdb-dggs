@@ -1,9 +1,21 @@
 import { defineConfig } from 'vitepress'
+import { liveSql } from 'duckdb-docs-live/vitepress/plugin'
 
 export default defineConfig({
   title: 'duck_dggs',
   description: 'DuckDB extension for Discrete Global Grid Systems powered by DGGRID v9',
   base: '/duckdb-dggs/',
+  // design notes and plans, not site pages
+  srcExclude: ['superpowers/**'],
+  // runnable SQL examples (DuckDB-WASM, loaded on the first Run click)
+  markdown: {
+    config: (md) => md.use(liveSql),
+  },
+  vite: {
+    optimizeDeps: { exclude: ['@duckdb/duckdb-wasm'] },
+    // the package is symlinked from ../packages; resolve its peers from here
+    resolve: { dedupe: ['vue', '@duckdb/duckdb-wasm'] },
+  },
   head: [
     ['link', { rel: 'icon', href: '/duckdb-dggs/favicon.svg' }]
   ],
