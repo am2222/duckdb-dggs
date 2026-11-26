@@ -62,6 +62,8 @@
 #include <dglib/DgCell.h>         // DgCell
 #include <dglib/DgIVec2D.h>       // DgIVec2D (.i(), .j())
 #include <dglib/DgDVec2D.h>       // DgDVec2D (.x(), .y())
+#include <dglib/DgContCartRF.h>   // DgContCartRF (a quad's planar frame)
+#include <dglib/DgDiscRF2D.h>     // DgDiscRF2D (a quad's cell lattice)
 #include <dglib/DgConstants.h>    // M_PIl, M_ZERO
 #include <dglib/DgHierNdx.h>      // DgHierNdx (int + string index)
 #include <dglib/DgHierNdxIntRF.h> // DgHierNdxIntCoord (.value())
@@ -1129,38 +1131,105 @@ SeqNum seqNumParent(const DggsParams &p, SeqNum seqnum) {
   return geoToSeqNum(parentParams, lon_deg, lat_deg);
 }
 
+// The parents of a cell are the res - 1 cells that share area with it: the
+// containing parent (seqNumParent) first, then the others in ascending order.
+//
+// dglib's setParents is not used for hexagon grids. Aperture 4 (DgIDGGS4H)
+// samples the cell's edge midpoints and aperture 3/7 (DgHexIDGGS) its
+// vertices, and those points can lie exactly on a parent edge or vertex. A
+// parent that only touches the cell at one point was then included or not
+// depending on the last bit of the float arithmetic, which differed between
+// platforms (cell 2412 at res 5 gave [599, 616, 615] on osx_arm64 and
+// [599, 598, 615] on WASM; 598 and 616 only touch it at a corner).
+// DgIDGGS43H's setParents is a dglib Fatal (process exit).
+//
+// Here every sample point (each vertex and edge midpoint) is first moved a
+// tiny step towards the cell centre, in the cell's planar Q2DD frame, so it
+// lies strictly inside the cell. A point inside the cell can only be in (or
+// on the edge of) a parent that shares area with the cell, so whichever way
+// a remaining tie between two parents is decided, both of them are area-
+// sharing parents and the set is the same everywhere. 1e-6 of the distance
+// to the centre is far above float noise (~1e-15 relative) and far below any
+// real overlap.
 std::vector<SeqNum> seqNumAllParents(const DggsParams &p, SeqNum seqnum) {
   if (p.res <= 0)
     throw std::runtime_error("Cannot get parents: already at resolution 0");
 
   auto t = getTransformer(p);
-  auto loc = t->inSEQNUM(seqnum);
-
-  DgLocVector parents(*(t->idggs));
-  t->idggs->setParents(p.res, *loc, parents);
-
+  const DgIDGGBase &dgg = *t->dgg;
   const DgIDGGBase &parent_dgg = t->idggs->idggBase(p.res - 1);
+  const SeqNum primary = seqNumParent(p, seqnum);
 
+  auto toParentSeqNum = [&](const DgLocation &loc) {
+    const DgQ2DICoord *q2di = parent_dgg.getAddress(loc);
+    return static_cast<SeqNum>(parent_dgg.bndRF().seqNumAddress(*q2di));
+  };
+
+  std::set<SeqNum> others;
+
+  if (dgg.gridTopo() == Hexagon) {
+    const DgQ2DICoord q2di = q2diFromSeqNum(*t->bndRF, seqnum);
+
+    // A pentagon sits at an icosahedron vertex, inside the pentagon parent
+    // centred on the same vertex: its only parent is the containing one.
+    if (q2di.coord() != DgIVec2D(0, 0)) {
+      const DgDiscRF2D &grid2D = dgg.grid2D();
+      const DgContCartRF &cc = dgg.ccFrame();
+
+      // Cell centre and vertices in the quad's planar frame.
+      LocPtr centreLoc(grid2D.makeLocation(q2di.coord()));
+      DgPolygon verts(cc);
+      grid2D.setVertices(*centreLoc, verts);
+      cc.convert(verts);
+      cc.convert(centreLoc.get());
+      const DgDVec2D c = *cc.getAddress(*centreLoc);
+
+      std::vector<DgDVec2D> vs;
+      for (int i = 0; i < verts.size(); i++)
+        vs.push_back(*cc.getAddress(verts[i]));
+
+      const long double keep = 1.0L - 1e-6L;
+      auto inward = [&](const DgDVec2D &v) {
+        return DgDVec2D(c.x() + (v.x() - c.x()) * keep,
+                        c.y() + (v.y() - c.y()) * keep);
+      };
+
+      // Sample points in the Q2DD frame of the cell's quad (the same frame
+      // dglib builds the cell boundary in), then on to the parent grid.
+      DgLocVector samples(dgg.q2ddRF());
+      auto add = [&](const DgDVec2D &pt) {
+        LocPtr loc(dgg.q2ddRF().makeLocation(
+            DgQ2DDCoord(q2di.quadNum(), inward(pt))));
+        samples.push_back(*loc);
+      };
+      for (std::size_t i = 0; i < vs.size(); i++) {
+        add(vs[i]);
+        add(DgDVec2D::midPoint(vs[i], vs[(i + 1) % vs.size()]));
+      }
+
+      dgg.vertexRF().convert(samples);
+      dgg.geoRF().convert(samples);
+      parent_dgg.convert(samples);
+      for (int i = 0; i < samples.size(); i++)
+        others.insert(toParentSeqNum(samples[i]));
+    }
+  } else {
+    // Triangle / diamond grids are congruent: one parent.
+    auto loc = t->inSEQNUM(seqnum);
+    DgLocVector parents(*(t->idggs));
+    t->idggs->setParents(p.res, *loc, parents);
+    for (int i = 0; i < parents.size(); i++) {
+      DgLocation parent_loc(parents[i]);
+      parent_dgg.convert(&parent_loc);
+      others.insert(toParentSeqNum(parent_loc));
+    }
+  }
+
+  others.erase(primary);
   std::vector<SeqNum> result;
-  std::set<uint64_t> seen;
-  for (int i = 0; i < parents.size(); i++) {
-    DgLocation parent_loc(parents[i]);
-    parent_dgg.convert(&parent_loc);
-    const DgQ2DICoord *parent_q2di = parent_dgg.getAddress(parent_loc);
-    uint64_t parent_seqnum = parent_dgg.bndRF().seqNumAddress(*parent_q2di);
-    if (seen.insert(parent_seqnum).second)
-      result.push_back(static_cast<SeqNum>(parent_seqnum));
-  }
-
-  // Ensure the primary (containing) parent is first
-  SeqNum primary = seqNumParent(p, seqnum);
-  auto it = std::find(result.begin(), result.end(), primary);
-  if (it != result.end() && it != result.begin()) {
-    std::iter_swap(result.begin(), it);
-  } else if (it == result.end()) {
-    result.insert(result.begin(), primary);
-  }
-
+  result.reserve(others.size() + 1);
+  result.push_back(primary);
+  result.insert(result.end(), others.begin(), others.end());
   return result;
 }
 

@@ -563,7 +563,7 @@ SELECT bool_and(len(l) BETWEEN 1 AND 3
             AND list_sort(list_slice(l, 2, len(l))) = list_slice(l, 2, len(l))
             AND len(list_distinct(l)) = len(l))
 FROM (SELECT seqnum_all_parents(c::UBIGINT, 5) AS l, seqnum_parent(c::UBIGINT, 5) AS p
-      FROM range(0, 10242, 51) t(c));
+      FROM range(1, 10242, 51) t(c));
 ----
 true
 
@@ -590,7 +590,7 @@ SELECT bool_and(len(l) >= 1 AND l[1] = p
             AND list_sort(list_slice(l, 2, len(l))) = list_slice(l, 2, len(l)))
 FROM (SELECT seqnum_all_parents(c::UBIGINT, 3, dggs_params('ISEA', 4, 'HEXAGON', 0.0, 58.28252559, 11.25, true, '4343')) AS l,
              seqnum_parent(c::UBIGINT, 3, dggs_params('ISEA', 4, 'HEXAGON', 0.0, 58.28252559, 11.25, true, '4343')) AS p
-      FROM range(0, 162) t(c));
+      FROM range(1, 163) t(c));
 ----
 true
 

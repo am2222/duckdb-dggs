@@ -58,17 +58,28 @@ jobs:
           ref: ${{ steps.ref.outputs.ref }}
           path: released
 
-      - name: Download the published extension
-        run: curl -fsSLo "$RUNNER_TEMP/duck_dggs.duckdb_extension.wasm" "$PUBLISHED_URL"
-
-      - name: Known failures of the released docs
-        id: known
+      # A release that includes the live doc examples ships this file. Older
+      # releases have untriaged docs, so there is nothing meaningful to check yet.
+      - name: Check the released ref has live doc examples
+        id: released
+        env:
+          REF: ${{ steps.ref.outputs.ref }}
         run: |
           if [[ -f released/docs/wasm-known-failures.json ]]; then
-            echo "file=released/docs/wasm-known-failures.json" >> "$GITHUB_OUTPUT"
+            echo "live=true" >> "$GITHUB_OUTPUT"
+          else
+            msg="Released ref ${REF} predates the live doc examples; this check starts with the next release."
+            echo "::notice::${msg}"
+            echo "${msg}" >> "$GITHUB_STEP_SUMMARY"
+            echo "live=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Download the published extension
+        if: steps.released.outputs.live == 'true'
+        run: curl -fsSLo "$RUNNER_TEMP/duck_dggs.duckdb_extension.wasm" "$PUBLISHED_URL"
+
       - uses: ./.github/actions/wasm-sqllogictest
+        if: steps.released.outputs.live == 'true'
         with:
           extension: duck_dggs
           extension-file: ${{ runner.temp }}/duck_dggs.duckdb_extension.wasm
@@ -76,4 +87,4 @@ jobs:
           tests: released/test/sql
           docs: released/docs
           published: 'true'
-          known-failures: ${{ steps.known.outputs.file }}
+          known-failures: released/docs/wasm-known-failures.json
