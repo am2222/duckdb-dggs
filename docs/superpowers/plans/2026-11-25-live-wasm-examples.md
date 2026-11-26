@@ -291,3 +291,27 @@ Algorithm (the part a signature doesn't determine):
 - [ ] **Step 4 (the cross-platform proof):** with `spatial` on the native build, for 2412 @ 5 and the 200-cell sample, assert every returned parent has `ST_Area(ST_Intersection(child, parent)) > 0` and every parent with positive overlap among the child's neighbours' parents is returned. Then WASM: build `wasm_eh` locally if the toolchain allows (user's emsdk 4.0.7 at /Users/majid/Ready/Apps/tests/personal/emsdk — do NOT change its active version; `make wasm_eh` per extension-ci-tools); if that isn't feasible in reasonable time, say so — CI's `wasm-test` job (test/sql + doc examples on the fresh wasm_eh) is the WASM proof after the maintainer pushes.
 - [ ] **Step 5:** docs. In `## seqnum_all_parents`: definition = "parents whose cells share area with the cell; the containing parent (`seqnum_parent`) first, the rest ascending". Update the example to `[599, 615]` with comment "Cell 2412 straddles two parents". Add a short `::: info Why not cells that only touch at a corner?` block: aperture-4/3/7 cells can meet parent corners exactly; parents touching only at a single point are excluded because deciding them is a floating-point tie that gave different answers on different platforms (e.g. native vs WASM); sampling is moved slightly inside the cell so the result is the same everywhere. Remove the known-failures entry; update triage notes.
 - [ ] **Step 6:** run the doc examples with `run.mjs --docs docs --known-failures docs/wasm-known-failures.json` against the CI wasm file **with `--published` off**: `seqnum_all_parents/1` will now `differ` on that older build (it still has the old algorithm) — expected; record it, don't add a known failure. Checkpoint.
+
+### Task 11: Deterministic `seqnum_parent` (added 2026-11-25, maintainer chose "fixed tie-break")
+
+**Why:** Task 10 measured that `seqnum_parent` differs native vs WASM for cells whose centre lies exactly on a parent edge (aperture 4: 3839/10242 at res 5) or parent vertex (aperture 3: 1079/2432 at res 5); aperture 7 unaffected. It quantises the centre, and the tie is decided by float rounding. This also makes the first element of `seqnum_all_parents` platform-dependent.
+
+**Decision:** before quantising the centre into the res−1 grid, move it by a tiny fixed offset in the planar Q2DD frame, in one fixed direction that is not parallel to any hex edge or radius (so it never lands on a parent vertex), e.g. `(+1e-4, +0.37e-4) × cell radius`. Use the same planar quantisation Task 10 uses for in-quad samples. The result must always be one of the area-sharing parents (`seqnum_all_parents` set). Hexagon grids only; TRIANGLE/DIAMOND unchanged. Breaking change, same 0.3.0 release.
+
+**Files:** `src/dggrid_transform.cpp` (`seqNumParent`), `test/sql/duck_dggs.test`, `docs/functions/parent-child.md` (`## seqnum_parent` + `## seqnum_all_parents`).
+
+- Tests: for every cell at ap4 res 5, ap3 res 5, ap7 res 4: `list_contains(seqnum_all_parents(c), seqnum_parent(c))` and `seqnum_all_parents(c)[1] = seqnum_parent(c)`; interior cells unchanged (e.g. `seqnum_parent(2380, 5) = 599`); 2412 @ 5 parent stays 599 if the rule gives 599, otherwise update docs consistently.
+- Proof: native vs local `wasm_eh` (emsdk at ~/emsdk 6.0.9, `OVERRIDE_GIT_DESCRIBE=v2.0.0 make wasm_eh`) — `seqnum_parent` identical for every cell of ap3/4/7 at the resolutions above.
+- Docs: `seqnum_parent` gets a `::: warning Changed in 0.3.0` (cells centred exactly on a parent edge/corner now resolve by a fixed rule, identical on every platform; earlier versions could return either parent depending on platform). `seqnum_all_parents` "Changed in 0.3.0" stays; its order statement is now true everywhere.
+- Fold in Task 10 review findings: widen the inward inset from 1e-6 to 1e-4 of cell radius (smallest real overlap measured ≈0.35 % of area) and fix the comment's margin rationale; add a high-res test (ap4 res 28, ap7 res 20: lengths in {1,2}); ap43 comment: say the hexagon path no longer depends on `DgIDGGS43H::setParents` (aperture 43 is rejected at makeRF); strengthen ap3/ap7 tests to length sets over a range (ap7 {1,2}, ap3 {1,3}).
+
+### Task 12: Status indicator on `/wasm-status` (added 2026-11-25, maintainer request)
+
+**Why:** the only overall result today is a small green line "No differences or errors." above the table.
+
+**Design:** a summary card between the Run-all row and the table (`packages/duckdb-docs-live/vitepress/WasmStatus.vue` + `style.css`):
+- Big state line with icon and colour (VitePress vars, light/dark): **Running** "Running page 5 of 13…" with a progress bar; **Pass** "✓ All 85 compared examples match"; **Fail** "✗ 2 examples differ, 1 error" + a "Jump to first failure" link (anchor to the first failing row, which auto-expands); **Attention** (amber) when `problems` exist (known-failure list stale) even if nothing failed; **Could not start** when the engine/extension failed to load.
+- A stacked horizontal bar of the six statuses (proportional widths, each segment with a `title` tooltip and an accessible text equivalent), followed by the counts as chips in the shared `STATUS_ORDER`, zero-count chips dimmed.
+- Meta line: "Published extension v0.2.2" or "Local build <url>" + last run time and duration.
+- `aria-live="polite"` on the state line. Works at 375 px.
+- Verify in the browser for pass (local build), fail (published build: seqnum_all_parents/1 differs), running, and a stale-known-failure "attention" case (temporarily add a matching id to the known list, then restore).

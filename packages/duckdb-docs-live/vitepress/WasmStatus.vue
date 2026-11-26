@@ -5,7 +5,7 @@
 // CI uses one fresh database per page), so its totals equal CI's for the same
 // build. The engine is imported on mount: this page is the one place it loads
 // without a click.
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { withBase } from 'vitepress';
 import { applyKnownFailures } from '../src/examples.mjs';
 import { errorMessage } from '../src/sql.mjs';
@@ -33,6 +33,7 @@ const pageMs = ref({});
 const info = ref(null);
 const startError = ref('');
 const elapsed = ref(null);
+const lastRun = ref(null);
 const runs = ref(0);
 
 const applied = computed(() => applyKnownFailures(raw.value, known.value));
@@ -50,8 +51,66 @@ const rows = computed(() => {
   }));
 });
 const totals = computed(() => countStatuses(applied.value.results));
-const healthy = computed(() =>
-  finished.value && totals.value.differs === 0 && totals.value.error === 0 && problems.value.length === 0);
+
+// The overall state shown in the summary card.
+const state = computed(() => {
+  if (startError.value) return 'blocked';
+  if (!running.value && !finished.value) return 'idle';
+  if (running.value && !finished.value) return 'running';
+  if (totals.value.differs || totals.value.error) return 'fail';
+  if (problems.value.length) return 'attention';
+  return 'pass';
+});
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+const headline = computed(() => {
+  const t = totals.value;
+  switch (state.value) {
+    case 'running':
+      return `Running page ${Math.min(Object.keys(pageMs.value).length + 1, pages.value.length)} of ${pages.value.length}…`;
+    case 'blocked': return 'Could not start';
+    case 'fail': {
+      const parts = [];
+      if (t.differs) parts.push(`${plural(t.differs, 'example differs', 'examples differ')}`);
+      if (t.error) parts.push(plural(t.error, 'error', 'errors'));
+      return parts.join(', ');
+    }
+    case 'attention': return `Needs attention: ${plural(problems.value.length, 'problem', 'problems')} in the known-failures list`;
+    case 'pass': return `All ${t.match} compared examples match`;
+    default: return 'Waiting to run';
+  }
+});
+const stateIcon = computed(() => ({
+  running: '⏳', blocked: '⛔', fail: '✗', attention: '⚠', pass: '✓', idle: '·',
+}[state.value]));
+const barTotal = computed(() => Object.values(totals.value).reduce((a, b) => a + b, 0));
+const progress = computed(() => (pages.value.length ? Object.keys(pageMs.value).length / pages.value.length : 0));
+const firstFailure = computed(() => {
+  for (const row of rows.value) {
+    const bad = row.results.find((r) => r.status === 'differs' || r.status === 'error');
+    if (bad) return { page: row.page, id: bad.id };
+  }
+  return null;
+});
+async function jumpToFirstFailure() {
+  const f = firstFailure.value;
+  if (!f) return;
+  open.value = new Set([...open.value, f.page]);
+  await nextTick();
+  document.getElementById(`wasm-status-row-${f.page}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+const metaLine = computed(() => {
+  if (!info.value) return '';
+  const parts = [];
+  if (info.value.source === 'community') {
+    parts.push(`Published extension${info.value.extension ? ` ${info.value.extension}` : ''}`);
+  } else {
+    parts.push(`Local build ${info.value.source}`);
+  }
+  if (finished.value && lastRun.value) {
+    parts.push(`last run ${lastRun.value.toLocaleTimeString()}, took ${fmtMs(elapsed.value)}`);
+  }
+  return parts.join(' · ');
+});
 
 const LABEL = {
   match: '✓ match', differs: '✗ differs', error: '⚠ error', skipped: '⏭ skipped', shown: '👁 shown', unreleased: '🕓 unreleased',
@@ -97,6 +156,7 @@ async function runOnce(stale) {
   }
   current.value = '';
   elapsed.value = performance.now() - t0;
+  lastRun.value = new Date();
   finished.value = true;
   runs.value++;
 }
@@ -175,16 +235,48 @@ const shownStatements = (r) => {
       <button type="button" class="live-sql-btn primary" :disabled="!mounted || running" @click="runAll">
         {{ running ? 'Running…' : '▶ Run all' }}
       </button>
-      <span v-if="running && current" class="wasm-status-progress">
-        {{ Object.keys(pageMs).length + 1 }} / {{ pages.length }}: <code>{{ current }}</code>
-      </span>
-      <span v-else-if="finished" class="wasm-status-progress">
-        {{ applied.results.length }} examples on {{ pages.length }} pages in {{ fmtMs(elapsed) }}
-      </span>
-      <span v-else-if="!mounted" class="wasm-status-progress">
+      <span v-if="!mounted" class="wasm-status-progress">
         {{ totalExamples }} examples on {{ pages.length }} pages (needs JavaScript to run)
       </span>
     </div>
+
+    <p class="wasm-status-sr" role="status">{{ ['pass', 'fail', 'attention', 'blocked'].includes(state) ? headline : '' }}</p>
+
+    <section v-if="state !== 'idle'" :class="['wasm-status-card', state]" aria-label="Overall result">
+      <div class="wasm-status-card-main">
+        <p class="wasm-status-state">
+          <span class="wasm-status-state-icon" aria-hidden="true">{{ stateIcon }}</span>
+          <span>{{ headline }}</span>
+        </p>
+        <button
+          v-if="state === 'fail' && firstFailure"
+          type="button"
+          class="wasm-status-jump"
+          @click="jumpToFirstFailure"
+        >Jump to first failure</button>
+      </div>
+      <div v-if="state === 'running'" class="wasm-status-meter" role="progressbar" aria-label="Pages run"
+        :aria-valuemin="0" :aria-valuemax="pages.length" :aria-valuenow="Object.keys(pageMs).length">
+        <div class="wasm-status-meter-fill" :style="{ width: `${progress * 100}%` }"></div>
+      </div>
+      <p v-if="state === 'blocked'" class="wasm-status-card-detail">{{ startError }}</p>
+      <ul v-if="problems.length" class="wasm-status-card-problems">
+        <li v-for="(p, i) in problems" :key="i">{{ p }}</li>
+      </ul>
+      <template v-if="barTotal">
+        <div class="wasm-status-bar" role="img"
+          :aria-label="STATUS_ORDER.filter((s) => totals[s]).map((s) => `${totals[s]} ${s}`).join(', ')">
+          <span v-for="s in STATUS_ORDER" :key="s" v-show="totals[s]" :class="['seg', s]"
+            :style="{ flexGrow: totals[s] }" :title="`${totals[s]} ${s}`"></span>
+        </div>
+        <ul class="wasm-status-chips">
+          <li v-for="s in STATUS_ORDER" :key="s" :class="['chip', s, { zero: !totals[s] }]">
+            <span class="dot" aria-hidden="true"></span><b>{{ totals[s] }}</b> {{ s }}
+          </li>
+        </ul>
+      </template>
+      <p v-if="metaLine" class="wasm-status-card-meta">{{ metaLine }}</p>
+    </section>
 
     <dl v-if="info" class="wasm-status-info">
       <div><dt>Extension source</dt><dd><code>{{ info.source }}</code></dd></div>
@@ -192,16 +284,6 @@ const shownStatements = (r) => {
       <div><dt>DuckDB</dt><dd><code>{{ info.duckdb || '—' }}</code></dd></div>
       <div><dt>Engine</dt><dd><code>@duckdb/duckdb-wasm@{{ info.engine }}</code></dd></div>
     </dl>
-
-    <div v-if="startError" class="wasm-status-problems" role="alert">
-      <p>{{ startError }}</p>
-    </div>
-    <div v-if="problems.length" class="wasm-status-problems" role="alert">
-      <p v-for="(p, i) in problems" :key="i">problem: {{ p }}</p>
-    </div>
-    <p v-if="healthy" class="wasm-status-ok">
-      No differences or errors<template v-if="totals.unreleased"> ({{ totals.unreleased }} use functions that are not in the published build yet)</template>.
-    </p>
 
     <div class="wasm-status-table-wrap">
       <table class="wasm-status-table">
@@ -216,7 +298,7 @@ const shownStatements = (r) => {
         </thead>
         <tbody>
           <template v-for="row in rows" :key="row.page">
-            <tr :class="{ pending: !row.ran }">
+            <tr :id="`wasm-status-row-${row.page}`" :class="{ pending: !row.ran }">
               <td class="page">
                 <button
                   v-if="row.ran && nonMatch(row).length"

@@ -146,7 +146,11 @@ duckdb-dggs.
 ## Testing an unreleased build
 
 Serve the file with CORS (`npx http-server <dir> --cors`); its URL must end in
-`.duckdb_extension.wasm`. Then open any docs page with the build parameter:
+`.duckdb_extension.wasm`, and its host must be `localhost`, `127.0.0.1` or
+`[::1]`, or it must be on the docs site's own origin (a relative URL is resolved
+against the page). Builds load with unsigned extensions allowed, so any other
+host is refused: "only local builds (localhost) or this site's own files can be
+loaded". Then open any docs page with the build parameter:
 
 - dev server (`npm run dev`): `#build=<url>`. The dev server returns a 500 for
   `?build=...wasm`.

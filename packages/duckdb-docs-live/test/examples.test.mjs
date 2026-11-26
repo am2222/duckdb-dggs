@@ -97,6 +97,20 @@ test('unreleased only when published', async () => {
   assert.equal((await runExample(fakeSession({ 'SELECT foo()': err }), e, { published: false })).status, 'error');
 });
 
+test('only missing functions or macros are unreleased', async () => {
+  const cases = [
+    ['Catalog Error: Table with name x does not exist!', 'error'],
+    ['Binder Error: Referenced column y does not exist', 'error'],
+    ['Catalog Error: Macro Function with name m does not exist', 'unreleased'],
+    ['Binder Error: No function matches the given name and argument types', 'unreleased'],
+  ];
+  const e = ex([{ sql: 'SELECT q', expected: null }]);
+  for (const [msg, want] of cases) {
+    const r = await runExample(fakeSession({ 'SELECT q': new Error(msg) }), e, { published: true });
+    assert.equal(r.status, want, msg);
+  }
+});
+
 test('crash marks the rest', async () => {
   const s = fakeSession({ 'SELECT 1': new Error('Program terminated with exit(1)') });
   const e = ex([{ sql: 'SELECT 1', expected: null }]);

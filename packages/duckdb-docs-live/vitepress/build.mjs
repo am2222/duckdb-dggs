@@ -5,13 +5,36 @@
 
 export const BUILD_KEY = 'duckdb-docs-live:build';
 
-// DuckDB-WASM only loads extension files named *.duckdb_extension.wasm.
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+
 // Returns null when the URL is usable, otherwise the reason it is not.
-export function checkBuildUrl(buildUrl) {
-  const path = String(buildUrl).split(/[?#]/)[0];
-  return path.endsWith('.duckdb_extension.wasm')
-    ? null
-    : 'the file name must end in .duckdb_extension.wasm (DuckDB-WASM refuses any other name)';
+// - DuckDB-WASM only loads extension files named *.duckdb_extension.wasm.
+// - The engine allows unsigned extensions for a build, so a link with
+//   ?build= must not be able to make a visitor run a binary from anywhere:
+//   only a build served on this machine (localhost, 127.0.0.1, [::1]) or a
+//   file from this site's own origin is accepted.
+// `base` is the page URL the build URL is resolved against (default: the
+// current page); tests pass it so they need no DOM.
+export function checkBuildUrl(buildUrl, base) {
+  const page = base ?? (typeof window !== 'undefined' ? window.location.href : undefined);
+  let url;
+  try {
+    url = new URL(String(buildUrl), page);
+  } catch {
+    return 'not a valid URL';
+  }
+  if (!url.pathname.endsWith('.duckdb_extension.wasm'))
+    return 'the file name must end in .duckdb_extension.wasm (DuckDB-WASM refuses any other name)';
+  const local = (url.protocol === 'http:' || url.protocol === 'https:') && LOCAL_HOSTS.has(url.hostname);
+  let sameOrigin = false;
+  try {
+    sameOrigin = page !== undefined && url.origin === new URL(page).origin;
+  } catch {
+    // no usable page URL
+  }
+  if (!local && !sameOrigin)
+    return "only local builds (localhost) or this site's own files can be loaded";
+  return null;
 }
 
 // The build parameter in a location's search or hash: a string (possibly

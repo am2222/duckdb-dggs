@@ -4,7 +4,9 @@ import { runQuery, errorMessage, isEngineCrash } from './sql.mjs';
 import { compareResult } from './compare.mjs';
 
 const RANK = { match: 0, shown: 1, unreleased: 2, differs: 3, error: 4 };
-const UNRELEASED = /does not exist|No function matches/i;
+// Only a missing function or macro means "not in the published release yet";
+// other "does not exist" errors (tables, columns, ...) stay errors.
+const UNRELEASED = /(Function|Macro) with name .* does not exist|No function matches/i;
 
 const onlyComments = (sql) =>
   sql.replace(/\/\*[\s\S]*?\*\//g, '').replace(/--[^\n]*/g, '').trim() === '';

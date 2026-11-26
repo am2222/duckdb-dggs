@@ -314,24 +314,167 @@
   word-break: break-all;
 }
 
-.wasm-status-problems {
-  margin: 0 0 16px;
-  padding: 8px 12px;
-  border: 1px solid var(--vp-c-danger-1);
+/* overall status card */
+.wasm-status-card {
+  --card-c: var(--vp-c-text-2);
+  --card-bg: var(--vp-c-bg-soft);
+  margin: 0 0 20px;
+  padding: 14px 16px;
+  border: 1px solid var(--card-c);
+  border-left-width: 6px;
   border-radius: 8px;
-  background: var(--vp-c-danger-soft);
-  color: var(--vp-c-danger-1);
+  background: var(--card-bg);
+}
+
+.wasm-status-card.pass { --card-c: var(--vp-c-success-1); --card-bg: var(--vp-c-success-soft); }
+.wasm-status-card.fail,
+.wasm-status-card.blocked { --card-c: var(--vp-c-danger-1); --card-bg: var(--vp-c-danger-soft); }
+.wasm-status-card.attention { --card-c: var(--vp-c-warning-1); --card-bg: var(--vp-c-warning-soft); }
+.wasm-status-card.running { --card-c: var(--vp-c-brand-1); --card-bg: var(--vp-c-brand-soft); }
+
+.wasm-status-card-main {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.vp-doc .wasm-status-state {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  margin: 0;
+  color: var(--card-c);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.wasm-status-state-icon {
+  flex: none;
+}
+
+.wasm-status-jump {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--vp-c-brand-1);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
   font-size: 14px;
+  font-weight: 500;
+}
+
+.vp-doc .wasm-status-card-detail,
+.vp-doc .wasm-status-card-meta {
+  margin: 8px 0 0;
+  color: var(--vp-c-text-2);
+  font-size: 13px;
+  line-height: 1.5;
   word-break: break-word;
 }
 
-.vp-doc .wasm-status-problems p {
-  margin: 4px 0;
+.vp-doc .wasm-status-card-problems {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  font-size: 14px;
   line-height: 1.5;
+  word-break: break-word;
 }
 
-.vp-doc .wasm-status-ok {
-  color: var(--vp-c-success-1);
+.vp-doc .wasm-status-card-problems li {
+  margin: 2px 0;
+}
+
+.wasm-status-meter,
+.wasm-status-bar {
+  display: flex;
+  height: 10px;
+  margin-top: 12px;
+  overflow: hidden;
+  border-radius: 5px;
+  background: var(--vp-c-divider);
+}
+
+.wasm-status-meter {
+  height: 4px;
+}
+
+.wasm-status-meter-fill {
+  height: 100%;
+  background: var(--vp-c-brand-1);
+  transition: width 0.3s;
+}
+
+.wasm-status-bar .seg {
+  flex-basis: 0;
+  min-width: 3px;
+}
+
+.wasm-status-bar .seg + .seg {
+  border-left: 1px solid var(--vp-c-bg);
+}
+
+.wasm-status-bar .seg.match,
+.wasm-status-chips .match .dot { background: var(--vp-c-success-1); }
+.wasm-status-bar .seg.differs,
+.wasm-status-chips .differs .dot { background: var(--vp-c-danger-1); }
+.wasm-status-bar .seg.error,
+.wasm-status-chips .error .dot { background: var(--vp-c-danger-3, #b91c1c); }
+.wasm-status-bar .seg.skipped,
+.wasm-status-chips .skipped .dot { background: var(--vp-c-text-3); }
+.wasm-status-bar .seg.shown,
+.wasm-status-chips .shown .dot { background: var(--vp-c-brand-1); }
+.wasm-status-bar .seg.unreleased,
+.wasm-status-chips .unreleased .dot { background: var(--vp-c-warning-1); }
+
+.vp-doc .wasm-status-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vp-doc .wasm-status-chips li {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  margin: 0;
+  padding: 2px 10px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 999px;
+  background: var(--vp-c-bg);
+  font-size: 13px;
+}
+
+.wasm-status-chips .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.vp-doc .wasm-status-chips li.zero {
+  color: var(--vp-c-text-3);
+}
+
+.wasm-status-chips li.zero .dot {
+  opacity: 0.4;
+}
+
+.wasm-status-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .wasm-status-table-wrap {

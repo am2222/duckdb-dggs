@@ -15,6 +15,12 @@ UBIGINT seqnum_parent (seqnum UBIGINT, res INTEGER, params STRUCT)
 
 Returns the sequential index of the parent cell at resolution `res - 1` that contains the centre of the given cell. The resolution must be > 0.
 
+In hexagon grids with aperture 3 or 4 steps many cells have their centre exactly on a parent's edge (aperture 4) or corner (aperture 3), so the centre is in two or three parents. Such a cell gets the parent that holds a point moved from the centre by a tiny fixed step (1e-4 of the cell radius, in a fixed direction in the grid's planar frame). The result is always one of the cell's [`seqnum_all_parents`](#seqnum_all_parents), and it is the same on every platform.
+
+::: warning Changed in 0.3.0
+Cells centred exactly on a parent edge or corner now get their parent by the fixed rule above, identically on every platform. Earlier versions could return either parent, depending on the platform (native and WASM disagreed for about 40 % of the cells of grids with aperture 3 or 4 steps). Cell 2412 at res 5, for example, has its centre on the edge between 599 and 615 and is now 615 everywhere. Cells whose centre is inside one parent are unchanged.
+:::
+
 ### Example
 
 ```sql
@@ -29,6 +35,12 @@ SELECT seqnum_parent(2380::UBIGINT, 5);
 └───────────────────────────────────────────┘
 ```
 
+```sql
+-- Cell 2412's centre is on the edge between 599 and 615
+SELECT seqnum_parent(2412::UBIGINT, 5);
+-- → 615
+```
+
 ## seqnum_all_parents
 
 ### Signatures
@@ -40,22 +52,22 @@ UBIGINT[] seqnum_all_parents (seqnum UBIGINT, res INTEGER, params STRUCT)
 
 ### Description
 
-Returns the sequential indices of the parent cells at resolution `res - 1` that **share area** with the given cell: the containing parent (`seqnum_parent`) first, then the others in ascending order. An interior cell has 1 parent; a cell that straddles a parent boundary has 2 or 3.
+Returns the sequential indices of every parent cell at resolution `res - 1` that **touches** the cell (shares area, an edge or a corner): the containing parent (`seqnum_parent`) first, then the others in ascending order. An interior cell has 1 parent. A cell on a parent boundary has 3 in aperture 3 and 7 grids, and 4 in aperture 4 grids (it straddles 2 parents and touches 2 more at its corners).
 
 This is useful for identifying boundary cells that belong to multiple parent regions.
 
 ::: warning Changed in 0.3.0
-Earlier versions also returned parents that only touch the cell at a corner, and which of those were returned depended on the platform. They also listed the parents in no fixed order. From 0.3.0 the result is the containing parent first, then the other area-sharing parents in ascending order. For example, cell 2412 at res 5 was `[599, 616, 615]` or `[599, 598, 615]` and is now `[599, 615]`.
+Results are now complete and identical on every platform. Earlier versions missed some of the parents that touch the cell only at a corner, which ones depended on the platform, and the parents came in no fixed order. For cell 2412 at res 5, for example, the 0.2.2 docs showed `[615, 599, 616]` and other platforms gave other lists, such as `[599, 616, 615]` or `[599, 598, 615]`; it is now `[615, 598, 599, 616]` everywhere. The first element follows the new tie rule of [`seqnum_parent`](#seqnum_parent).
 :::
 
-::: info Why not cells that only touch at a corner?
-In aperture 3, 4 and 7 hexagon grids a cell's corner can sit exactly on a parent's edge or corner. Cell 2412 at res 5 shares about half its area with each of 599 and 615, and touches 598 and 616 at a single point each. Deciding whether such a point belongs to a parent is a floating-point tie, and it gave different answers on different platforms (native and WASM). So parents that only touch the cell at a point are excluded, and the points used to find the parents are moved slightly inside the cell, so every platform finds the same parents.
+::: info Why corner contacts used to differ between platforms
+In aperture 3, 4 and 7 hexagon grids a cell's corner can sit exactly on a parent's edge or corner. Cell 2412 at res 5 shares about half its area with each of 599 and 615, and touches 598 and 616 at a single corner each. Whether such a corner was counted was decided by floating-point rounding, so platforms disagreed: native gave `[599, 616, 615]` and WASM `[599, 598, 615]`. Now every parent that touches the cell is included, found by sampling a small ring of points around each corner and edge midpoint, so the result is the same everywhere.
 :::
 
 ### Example
 
 ```sql
--- Cell 2412 straddles two parents
+-- Cell 2412 straddles two parents and touches two more at its corners
 SELECT seqnum_all_parents(2412::UBIGINT, 5);
 ```
 ```
@@ -63,7 +75,7 @@ SELECT seqnum_all_parents(2412::UBIGINT, 5);
 │ seqnum_all_parents(CAST(2412 AS "UBIGINT"), 5) │
 │                    uint64[]                    │
 ├────────────────────────────────────────────────┤
-│ [599, 615]                                     │
+│ [615, 598, 599, 616]                           │
 └────────────────────────────────────────────────┘
 ```
 

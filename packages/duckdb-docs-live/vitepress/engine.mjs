@@ -116,7 +116,8 @@ async function createSession(config, buildUrl) {
   }
   try {
     if (buildUrl) {
-      await conn.query(`LOAD '${quote(buildUrl)}'`);
+      // Resolved against the page, so a build from this site may be relative.
+      await conn.query(`LOAD '${quote(new URL(buildUrl, window.location.href).href)}'`);
     } else {
       await conn.query(`INSTALL ${ext} FROM community`);
       await conn.query(`LOAD ${ext}`);
@@ -145,8 +146,10 @@ async function createSession(config, buildUrl) {
 
 const sessions = new Map();
 
-// One engine per page and build URL. A session whose engine has died is
-// replaced on the next call; `fresh: true` bypasses the memo.
+// One engine per build URL, shared by every page while the reader navigates
+// within the site (the memo lives as long as the browser tab's JS context; a
+// full reload starts a new one). A session whose engine has died is replaced
+// on the next call; `fresh: true` bypasses the memo.
 export async function getSession(config, buildUrl = null, opts = {}) {
   if (typeof window === 'undefined') throw new Error('getSession() runs in the browser only');
   const key = buildUrl ?? '';

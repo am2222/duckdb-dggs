@@ -42,7 +42,9 @@ Both install the engine (`@duckdb/duckdb-wasm@1.33.1-dev119.0`, DuckDB v2.0.0)
 into the action directory and run its `run.mjs`; neither builds anything.
 `test_wasm` downloads the published file to `build/wasm-published/` and passes
 `--published`, so examples that use functions the published build lacks are
-reported as `unreleased` instead of failing. Requires Node 20+ and network
+reported as `unreleased` instead of failing. `make test_wasm` runs this tree's `test/sql` and `docs` against the
+published build, so it fails when the tree is ahead of the release (new or
+changed functions); use `make test_wasm_local` for unreleased work. Requires Node 20+ and network
 access. `WasmDeployedTest.yml` runs the same against the published build every
 Monday, using the tests and docs of the released commit (`repo.ref` in
 `description.yml`).
@@ -58,6 +60,11 @@ npx http-server <dir> --cors      # <dir> holds duck_dggs.duckdb_extension.wasm
 ```
 
 - The URL must end in `.duckdb_extension.wasm` and be served with CORS.
+- Only a build served on this machine (`localhost`, `127.0.0.1`, `[::1]`) or a
+  file from the docs site's own origin is accepted: the build is loaded with
+  unsigned extensions allowed, so a shared link must not be able to point a
+  reader's browser at a binary from anywhere else. A relative URL is resolved
+  against the page.
 - With the dev server (`cd docs && npm run dev`) use the hash form,
   `http://localhost:5173/duckdb-dggs/functions/utility#build=http://localhost:8080/duck_dggs.duckdb_extension.wasm`.
   The dev server answers `?build=...wasm` with a 500 (it treats the `.wasm` in

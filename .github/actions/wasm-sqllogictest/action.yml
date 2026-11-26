@@ -142,8 +142,6 @@ runs:
 
         args=(--extension "$EXTENSION" --extension-file "$file" --engine-package "$ENGINE_PACKAGE"
               --timeout "$TIMEOUT" --json "$RUNNER_TEMP/wasm-sqllogictest-report.json")
-        # Tests are optional once docs are given; with neither, run the default.
-        if [[ -z "${TESTS//[[:space:]]/}" && -n "${DOCS//[[:space:]]/}" ]]; then TESTS=""; fi
         while IFS= read -r t; do [[ -n "${t// }" ]] && args+=(--tests "$t"); done <<< "$TESTS"
         while IFS= read -r d; do [[ -n "${d// }" ]] && args+=(--docs "$d"); done <<< "$DOCS"
         [[ -n "$KNOWN_FAILURES" ]] && args+=(--known-failures "$KNOWN_FAILURES")
