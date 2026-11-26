@@ -66,7 +66,7 @@ STRUCT dggs_preset (name VARCHAR)
 
 ### Description
 
-Returns the `dggs_params` struct of one of DGGRID's named grids: `IGEO7v1`, `IGEO7v2` (alias `IGEO7`), or `<ISEA|IVEA|FULLER><3H|4H|7H|4T|4D>` with an optional `S` (authalic sphere) or `L` (WGS84) suffix. See [Presets](/guide/grid-configuration#presets).
+Returns the `dggs_params` struct of one of DGGRID's named grids: `IGEO7v1`, `IGEO7v2` (alias `IGEO7`), or `<ISEA|IVEA|FULLER><3H|4H|7H|4T|4D>` with an optional `S` (authalic sphere) or `L` (WGS84) suffix and an optional `Z` or `Q` index suffix (e.g. `ISEA4TSQ`). See [Presets](/guide/grid-configuration#presets).
 
 ### Example
 

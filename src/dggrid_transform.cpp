@@ -63,6 +63,8 @@
 #include <dglib/DgIVec2D.h>       // DgIVec2D (.i(), .j())
 #include <dglib/DgDVec2D.h>       // DgDVec2D (.x(), .y())
 #include <dglib/DgConstants.h>    // M_PIl, M_ZERO
+#include <dglib/DgGeodesic.h>     // WGS84 geodesics (DGGRID 9.3)
+#include <dglib/DgWGS84RF.h>      // WGS84 axes
 #include <dglib/DgHierNdx.h>      // DgHierNdx (int + string index)
 #include <dglib/DgHierNdxIntRF.h> // DgHierNdxIntCoord (.value())
 #include <dglib/DgHierNdxSystemRFBase.h>  // per-resolution Z* index RF
@@ -158,12 +160,15 @@ struct Transformer {
   // hierarchical indexing systems built over the whole IDGGS; these point at
   // the system's RF for this resolution.
   const DgVertex2DDRF *vertexRF = nullptr; // dgg.vertexRF() - always available
-  const DgHierNdxSystemRFBase *zorderRF = nullptr; // pure aperture 3/4 hexagon
+  const DgHierNdxSystemRFBase *zorderRF = nullptr; // aperture 3/4 hex, diamond
   const DgHierNdxSystemRFBase *z3RF = nullptr;     // pure aperture 3 hexagon
   const DgHierNdxSystemRFBase *z7RF = nullptr;     // pure aperture 7 hexagon
+  const DgHierNdxSystemRFBase *quadtreeRF = nullptr; // aperture 4 triangle
 
-  // The grid's native indexing hierarchy (Z3 for aperture 3, ZOrder for 4,
-  // Z7 for 7) across all resolutions; drives the index parent/children.
+  // The grid's native indexing hierarchy (Z3 for aperture 3 hexagons, ZOrder
+  // for aperture 4 hexagons and diamonds, Z7 for aperture 7 hexagons,
+  // Quadtree for triangles) across all resolutions; drives the index
+  // parent/children and index strings.
   const DgHierNdxSystemRFSBase *hierSys = nullptr;
 
   // ── inX: create a DgLocation in the named source frame ──────────────
@@ -297,9 +302,18 @@ struct Transformer {
   }
 
   void outZORDER(LocPtr &loc, uint64_t &out_value) const {
-    outHierNdx(zorderRF,
-               "ZORDER not available for this aperture (use aperture 3 or 4)",
-               loc, out_value);
+    outHierNdx(zorderRF, kZOrderUnavailable, loc, out_value);
+  }
+
+  static constexpr const char *kZOrderUnavailable =
+      "ZORDER not available (requires an aperture 3 or 4 hexagon grid, or a "
+      "diamond grid)";
+  static constexpr const char *kQuadtreeUnavailable =
+      "QUADTREE not available (requires an aperture 4 triangle grid at "
+      "resolution 0-29)";
+
+  void outQUADTREE(LocPtr &loc, uint64_t &out_value) const {
+    outHierNdx(quadtreeRF, kQuadtreeUnavailable, loc, out_value);
   }
 
   void outZ3(LocPtr &loc, uint64_t &out_value) const {
@@ -347,9 +361,11 @@ struct Transformer {
   }
 
   LocPtr inZORDER(uint64_t value) const {
-    return inHierNdx(
-        zorderRF,
-        "ZORDER not available for this aperture (use aperture 3 or 4)", value);
+    return inHierNdx(zorderRF, kZOrderUnavailable, value);
+  }
+
+  LocPtr inQUADTREE(uint64_t value) const {
+    return inHierNdx(quadtreeRF, kQuadtreeUnavailable, value);
   }
 
   LocPtr inZ3(uint64_t value) const {
@@ -526,16 +542,24 @@ static std::shared_ptr<Transformer> buildTransformer(const DggsParams &p) {
   // ── Resolve hierarchical address frames (may be null) ─────────────────
   t->vertexRF = &dgg.vertexRF(); // Always available
 
-  // makeSystem() reports a dglib Fatal error (which exits the process) for an
-  // unsupported grid, so only ask for the systems the grid can carry:
-  // hexagon grids of a single pure aperture. (v8's z*RF() also existed on
-  // aperture-sequence grids; v9 refuses those.) The RF network owns the
-  // systems.
-  if (topo == Hexagon && idggs->isPure()) {
-    auto make = [&](DgHierNdxSysType type, const char *name) {
-      return DgHierNdxSystemRFSBase::makeSystem(*idggs, type,
-                                                dgg::addtype::Int64, name);
-    };
+  // makeSystem() reports a dglib Fatal error for an unsupported grid, so only
+  // ask for the systems the grid can carry: single-aperture hexagon grids,
+  // and the (always aperture 4) diamond and triangle grids. (v8's z*RF() also
+  // existed on aperture-sequence grids; v9 refuses those.) The RF network
+  // owns the systems.
+  auto make = [&](DgHierNdxSysType type, const char *name) {
+    return DgHierNdxSystemRFSBase::makeSystem(*idggs, type, dgg::addtype::Int64,
+                                              name);
+  };
+  if (topo == Diamond && idggs->isPure()) {
+    // DGGRID 9.3: ZOrder on diamond grids (it hung before 9.3).
+    t->hierSys = make(dgg::addtype::ZOrder, "ZOrder");
+    t->zorderRF = &t->hierSys->sysRF(p.res);
+  } else if (topo == Triangle && idggs->isPure() && p.res <= 29) {
+    // DGGRID 9.3: QUADTREE, defined for resolutions 0-29.
+    t->hierSys = make(dgg::addtype::Quadtree, "Quadtree");
+    t->quadtreeRF = &t->hierSys->sysRF(p.res);
+  } else if (topo == Hexagon && idggs->isPure()) {
     if (p.aperture == 7) {
       t->hierSys = make(dgg::addtype::Z7, "Z7");
       t->z7RF = &t->hierSys->sysRF(p.res);
@@ -671,7 +695,8 @@ DggsParams preset(const std::string &name) {
     return std::invalid_argument(
         "Unknown preset '" + name +
         "'. Use IGEO7v1, IGEO7v2, IGEO7, or <ISEA|IVEA|FULLER><3H|4H|7H|4T|4D> "
-        "with an optional S (sphere) or L (WGS84) suffix and a trailing Z.");
+        "with an optional S (sphere) or L (WGS84) suffix and a trailing Z "
+        "or Q.");
   };
 
   // IGEO7v1 / IGEO7v2 are the ISEA7HSZ / ISEA7HLZ presets; DGGRID v9.1 made
@@ -681,8 +706,10 @@ DggsParams preset(const std::string &name) {
   else if (n == "igeo7v2" || n == "igeo7")
     n = "isea7hlz";
 
-  // A Z suffix only turns on hierarchical index output in DGGRID.
-  if (!n.empty() && n.back() == 'z')
+  // A Z (ZORDER/Z3/Z7) or Q (QUADTREE, DGGRID 9.3) suffix only picks
+  // DGGRID's index output; here the grid's index system follows from its
+  // topology and aperture.
+  if (!n.empty() && (n.back() == 'z' || n.back() == 'q'))
     n.pop_back();
   // L presets take WGS84 lon/lat; S and the bare names the authalic sphere.
   const bool ellipsoidal = !n.empty() && n.back() == 'l';
@@ -1227,6 +1254,22 @@ SeqNum zOrderToSeqNum(const DggsParams &p, uint64_t value) {
   return r;
 }
 
+QuadtreeCoord seqNumToQuadtree(const DggsParams &p, SeqNum seqnum) {
+  auto t = getTransformer(p);
+  auto loc = t->inSEQNUM(seqnum);
+  QuadtreeCoord r{};
+  t->outQUADTREE(loc, r.value);
+  return r;
+}
+
+SeqNum quadtreeToSeqNum(const DggsParams &p, uint64_t value) {
+  auto t = getTransformer(p);
+  auto loc = t->inQUADTREE(value);
+  SeqNum r = 0;
+  t->outSEQNUM(loc, r);
+  return r;
+}
+
 Z3Coord seqNumToZ3(const DggsParams &p, SeqNum seqnum) {
   auto t = getTransformer(p);
   auto loc = t->inSEQNUM(seqnum);
@@ -1268,7 +1311,8 @@ static const DgHierNdxSystemRFSBase &requireHierSys(const Transformer &t) {
   if (!t.hierSys)
     throw std::runtime_error(
         "Index hierarchy not available (requires a single-aperture 3, 4 or 7 "
-        "hexagon grid)");
+        "hexagon grid, a diamond grid, or a triangle grid at resolution "
+        "0-29)");
   return *t.hierSys;
 }
 
@@ -1345,8 +1389,11 @@ SeqNum indexStringToSeqNum(const DggsParams &p, const std::string &ndx_str) {
   for (char c : ndx_str)
     if (!std::isdigit(static_cast<unsigned char>(c)))
       throw invalid("only digits are allowed");
-  if (std::stoi(ndx_str.substr(0, 2)) > 11)
-    throw invalid("base cell must be 00-11");
+  // Quadtree roots are the 20 icosahedron triangles; the other systems start
+  // from the 12 base cells (or the 10 diamond quads).
+  const int max_root = t->quadtreeRF ? 19 : 11;
+  if (std::stoi(ndx_str.substr(0, 2)) > max_root)
+    throw invalid("base cell must be 00-" + std::to_string(max_root));
   const char max_digit = static_cast<char>('0' + p.aperture - 1);
   for (std::size_t i = 2; i < ndx_str.size(); i++)
     if (ndx_str[i] > max_digit)
@@ -1418,6 +1465,16 @@ std::vector<SeqNum> seqNumKRing(const DggsParams &p, SeqNum seqnum, int k) {
 // PER-CELL AREA / GEODESY
 // ===========================================================================
 
+// The WGS84 ellipsoid (DGGRID 9.3's DgGeodesic works in meters and radians).
+static const DgGeodesic &wgs84Geodesic() {
+  static const DgGeodesic g(DgWGS84RF::semiMajorAxisMeters(),
+                            DgWGS84RF::semiMinorAxisMeters());
+  return g;
+}
+
+static constexpr long double kDegToRad = M_PI / 180.0L;
+static constexpr long double kRadToDeg = 180.0L / M_PI;
+
 double seqNumCellAreaKM(const DggsParams &p, SeqNum seqnum) {
   auto t = getTransformer(p);
   DgQ2DICoord q2di = q2diFromSeqNum(*t->bndRF, seqnum);
@@ -1428,9 +1485,91 @@ double seqNumCellAreaKM(const DggsParams &p, SeqNum seqnum) {
   t->geoRF->convert(loc.get());
   const DgGeoCoord center = *t->geoRF->getAddress(*loc);
 
+  if (t->wgs84) {
+    // The cell's geodetic vertices joined by WGS84 geodesics, as DGGRID 9.3
+    // measures cell area in a WGS84 frame. The latitudes are converted here
+    // rather than through dglib's DgAuthalic (see geodeticToAuthalicDeg).
+    std::vector<long double> lat, lon;
+    lat.reserve(static_cast<std::size_t>(poly.size()));
+    lon.reserve(static_cast<std::size_t>(poly.size()));
+    for (int i = 0; i < poly.size(); i++) {
+      const DgGeoCoord &v = *t->geoRF->getAddress(poly[i]);
+      lat.push_back(authalicToGeodeticDeg(static_cast<double>(v.latDegs())) *
+                    kDegToRad);
+      lon.push_back(v.lon());
+    }
+    long double area_m2 = 0;
+    if (!wgs84Geodesic().polygonArea(
+            lat, lon,
+            authalicToGeodeticDeg(static_cast<double>(center.latDegs())) *
+                kDegToRad,
+            center.lon(), area_m2))
+      throw std::runtime_error("cannot measure the area of cell " +
+                               std::to_string(seqnum));
+    return static_cast<double>(area_m2 / 1e6L);
+  }
+
   // geoPolyArea is in steradians on the unit sphere.
   const long double r = t->geoRF->earthRadiusKM();
   return static_cast<double>(DgGeoCoord::geoPolyArea(poly, center) * r * r);
+}
+
+static bool isWGS84Datum(const std::string &datum) {
+  if (datum == "WGS84")
+    return true;
+  if (datum == "AUTHALIC_SPHERE")
+    return false;
+  throw std::invalid_argument("Unknown datum '" + datum +
+                              "'. Use AUTHALIC_SPHERE or WGS84.");
+}
+
+static DgGeodesic::Arc wgs84Inverse(double lon1, double lat1, double lon2,
+                                    double lat2) {
+  DgGeodesic::Arc arc{};
+  if (!wgs84Geodesic().inverse(lat1 * kDegToRad, lon1 * kDegToRad,
+                               lat2 * kDegToRad, lon2 * kDegToRad, arc))
+    throw std::invalid_argument("coordinates must be finite");
+  return arc;
+}
+
+static double normalizeAzimuthDeg(double az) {
+  // [0, 360) so 0 is north and 90 is east.
+  az = std::fmod(az, 360.0);
+  return az < 0 ? az + 360.0 : az;
+}
+
+double geoDistanceKM(double lon1, double lat1, double lon2, double lat2,
+                     const std::string &datum) {
+  if (!isWGS84Datum(datum))
+    return geoDistanceKM(lon1, lat1, lon2, lat2);
+  return static_cast<double>(wgs84Inverse(lon1, lat1, lon2, lat2).s12 / 1e3L);
+}
+
+double geoAzimuthDeg(double lon1, double lat1, double lon2, double lat2,
+                     const std::string &datum) {
+  if (!isWGS84Datum(datum))
+    return geoAzimuthDeg(lon1, lat1, lon2, lat2);
+  const auto arc = wgs84Inverse(lon1, lat1, lon2, lat2);
+  return normalizeAzimuthDeg(static_cast<double>(
+      std::atan2(arc.sinAzimuth1, arc.cosAzimuth1) * kRadToDeg));
+}
+
+GeoCoord geoDestination(double lon, double lat, double azimuth_deg,
+                        double distance_km, const std::string &datum) {
+  if (!std::isfinite(lon) || !std::isfinite(lat) ||
+      !std::isfinite(azimuth_deg) || !std::isfinite(distance_km))
+    throw std::invalid_argument("geo_destination arguments must be finite");
+  // A sphere is a degenerate ellipsoid, so DgGeodesic covers both datums.
+  static const DgGeodesic sphere(DEFAULT_RADIUS_KM * 1e3L,
+                                 DEFAULT_RADIUS_KM * 1e3L);
+  const DgGeodesic &g = isWGS84Datum(datum) ? wgs84Geodesic() : sphere;
+  long double lat2 = 0, lon2 = 0, az2 = 0;
+  g.direct(lat * kDegToRad, lon * kDegToRad, azimuth_deg * kDegToRad,
+           distance_km * 1e3L, lat2, lon2, az2);
+  GeoCoord r{};
+  r.lon_deg = static_cast<double>(lon2 * kRadToDeg);
+  r.lat_deg = static_cast<double>(lat2 * kRadToDeg);
+  return r;
 }
 
 double geoDistanceKM(double lon1, double lat1, double lon2, double lat2) {

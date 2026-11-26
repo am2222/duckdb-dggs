@@ -1,7 +1,7 @@
 <div align="center">
   <img src="duck_dggs_icon.svg" width="240" alt="duck_dggs"/>
   <h1>duck_dggs</h1>
-  <p>A DuckDB extension for discrete global grid systems (DGGS) powered by <a href="https://github.com/sahrk/DGGRID">DGGRID v9.2</a>.<br/>
+  <p>A DuckDB extension for discrete global grid systems (DGGS) powered by <a href="https://github.com/sahrk/DGGRID">DGGRID v9.31</a>.<br/>
   Transforms geographic coordinates to and from DGGS cell identifiers across multiple coordinate reference frames.</p>
   <p><strong><a href="https://am2222.github.io/duckdb-dggs/">Documentation</a> · <a href="CHANGELOG.md">Changelog</a></strong></p>
   <p>
@@ -10,7 +10,7 @@
     <a href="test/sql"><img src="https://img.shields.io/badge/SQL%20tests-176-brightgreen?style=flat" alt="SQL tests: 176"/></a>
     <a href="https://github.com/am2222/duckdb-dggs/releases"><img src="https://img.shields.io/github/v/release/am2222/duckdb-dggs?style=flat&label=release" alt="Release"/></a>
     <a href="https://github.com/duckdb/duckdb"><img src="https://img.shields.io/badge/DuckDB-v2.0-FFF000?style=flat" alt="DuckDB v2.0"/></a>
-    <a href="https://github.com/sahrk/DGGRID"><img src="https://img.shields.io/badge/DGGRID-v9.2-blue?style=flat" alt="DGGRID v9.2"/></a>
+    <a href="https://github.com/sahrk/DGGRID"><img src="https://img.shields.io/badge/DGGRID-v9.31-blue?style=flat" alt="DGGRID v9.31"/></a>
     <a href="LICENSE"><img src="https://img.shields.io/github/license/am2222/duckdb-dggs?style=flat" alt="License"/></a>
   </p>
 </div>
@@ -58,11 +58,17 @@ SELECT seqnum_k_ring(2380::UBIGINT, 1, 5);
 SELECT seqnum_index_children(599::UBIGINT, 4);
 -- → [2380, 2381, 2412, 2413]
 
--- True area of one cell, and great-circle distance between points
+-- True area of one cell, and great-circle / WGS84 geodesic distance
 SELECT seqnum_cell_area_km(2380::UBIGINT, 5);
--- → 49815.21462915404
+-- → 49815.214505404074
 SELECT geo_distance_km('POINT(-75.7 45.4)'::GEOMETRY, 'POINT(-0.1 51.5)'::GEOMETRY);
--- → 5364.664130066861
+-- → 5364.66413006686
+SELECT geo_distance_km('POINT(-75.7 45.4)'::GEOMETRY, 'POINT(-0.1 51.5)'::GEOMETRY, 'WGS84');
+-- → 5380.440419540828
+
+-- QUADTREE index of a triangle-grid cell (DGGRID 9.3)
+SELECT seqnum_to_quadtree(100::UBIGINT, 4, dggs_preset('ISEA4T'));
+-- → 547187354725515264
 ```
 
 ---
@@ -148,21 +154,24 @@ Every function has a second overload that accepts an explicit [`dggs_params`](#d
 | [`seqnum_parent`](#seqnum_parent) | SEQNUM, res | `UBIGINT` | Parent cell at res-1. |
 | [`seqnum_all_parents`](#seqnum_all_parents) | SEQNUM, res | `UBIGINT[]` | All touching parent cells at res-1. |
 | [`seqnum_children`](#seqnum_children) | SEQNUM, res | `UBIGINT[]` | Child cells at res+1. |
-| [`seqnum_index_parent`](#seqnum_index_parent) | SEQNUM, res | `UBIGINT` | Parent in the Z3/ZOrder/Z7 index hierarchy (strict tree). |
-| [`seqnum_index_children`](#seqnum_index_children) | SEQNUM, res | `UBIGINT[]` | Children in the Z3/ZOrder/Z7 index hierarchy (non-overlapping). |
-| [`seqnum_to_index_string`](#seqnum_to_index_string) | SEQNUM, res | `VARCHAR` | Z3/ZOrder/Z7 index in its text form (base cell + one digit per resolution). |
+| [`seqnum_index_parent`](#seqnum_index_parent) | SEQNUM, res | `UBIGINT` | Parent in the Z3/ZOrder/Z7/QUADTREE index hierarchy (strict tree). |
+| [`seqnum_index_children`](#seqnum_index_children) | SEQNUM, res | `UBIGINT[]` | Children in the Z3/ZOrder/Z7/QUADTREE index hierarchy (non-overlapping). |
+| [`seqnum_to_index_string`](#seqnum_to_index_string) | SEQNUM, res | `VARCHAR` | Hierarchical index in its text form (root + one digit per resolution). |
 | [`index_string_to_seqnum`](#index_string_to_seqnum) | VARCHAR, res | `UBIGINT` | Index text form back to a sequential index. |
 | [`seqnum_k_ring`](#seqnum_k_ring) | SEQNUM, k, res | `UBIGINT[]` | The cell plus every cell within k neighbor steps. |
-| [`seqnum_cell_area_km`](#seqnum_cell_area_km) | SEQNUM, res | `DOUBLE` | True spherical area of one cell in km². |
+| [`seqnum_cell_area_km`](#seqnum_cell_area_km) | SEQNUM, res | `DOUBLE` | True area of one cell in km² (sphere, or WGS84 ellipsoid on WGS84 grids). |
 | [`polygon_to_seqnums`](#polygon_to_seqnums) | GEOMETRY, res | `UBIGINT[]` | Cells whose centre lies inside a (multi)polygon. |
-| [`geo_distance_km`](#geo_distance_km) | GEO, GEO | `DOUBLE` | Great-circle distance in km. |
-| [`geo_azimuth_deg`](#geo_azimuth_deg) | GEO, GEO | `DOUBLE` | Initial great-circle bearing in degrees. |
-| [`seqnum_to_zorder`](#seqnum_to_zorder) | SEQNUM, res | `UBIGINT` | Sequential index to Z-order index. |
+| [`geo_distance_km`](#geo_distance_km) | GEO, GEO [, datum] | `DOUBLE` | Great-circle (or WGS84 geodesic) distance in km. |
+| [`geo_azimuth_deg`](#geo_azimuth_deg) | GEO, GEO [, datum] | `DOUBLE` | Initial bearing in degrees. |
+| [`geo_destination`](#geo_destination) | GEO, azimuth, km [, datum] | `GEOMETRY` | Point reached along a bearing for a distance. |
+| [`seqnum_to_zorder`](#seqnum_to_zorder) | SEQNUM, res | `UBIGINT` | Sequential index to Z-order index (aperture 3/4 hexagons, diamonds). |
 | [`zorder_to_seqnum`](#zorder_to_seqnum) | ZORDER, res | `UBIGINT` | Z-order index to sequential index. |
 | [`seqnum_to_z3`](#seqnum_to_z3) | SEQNUM, res | `UBIGINT` | Sequential index to Z3 index (aperture 3). |
 | [`z3_to_seqnum`](#z3_to_seqnum) | Z3, res | `UBIGINT` | Z3 index to sequential index. |
 | [`seqnum_to_z7`](#seqnum_to_z7) | SEQNUM, res | `UBIGINT` | Sequential index to Z7 index (aperture 7). |
 | [`z7_to_seqnum`](#z7_to_seqnum) | Z7, res | `UBIGINT` | Z7 index to sequential index. |
+| [`seqnum_to_quadtree`](#seqnum_to_quadtree) | SEQNUM, res | `UBIGINT` | Sequential index to QUADTREE index (triangles). |
+| [`quadtree_to_seqnum`](#quadtree_to_seqnum) | QUADTREE, res | `UBIGINT` | QUADTREE index to sequential index. |
 | [`seqnum_to_vertex2dd`](#seqnum_to_vertex2dd) | SEQNUM, res | VERTEX2DD | Sequential index to vertex 2DD coords. |
 | [`vertex2dd_to_seqnum`](#vertex2dd_to_seqnum) | VERTEX2DD, res | `UBIGINT` | Vertex 2DD coords to sequential index. |
 | [`igeo7_from_string`](#igeo7_from_string) | VARCHAR | `UBIGINT` | Parse compact IGEO7/Z7 string → packed index. |
@@ -228,11 +237,12 @@ STRUCT dggs_preset (name VARCHAR)
 
 #### Description
 
-Returns the `dggs_params` struct of one of DGGRID v9.2's named grids:
+Returns the `dggs_params` struct of one of DGGRID v9.31's named grids:
 `IGEO7v1` (ISEA7H on the authalic sphere), `IGEO7v2` / `IGEO7` (ISEA7H with
 WGS84 lon/lat), or `<ISEA|IVEA|FULLER><3H|4H|7H|4T|4D>` with an optional `S`
-(authalic sphere) or `L` (WGS84) suffix. Case-insensitive; a trailing `Z` is
-accepted.
+(authalic sphere) or `L` (WGS84) suffix. Case-insensitive; a trailing `Z` or
+`Q` (DGGRID 9.3's QUADTREE presets such as `ISEA4TSQ`) is accepted and gives
+the same grid.
 
 #### Example
 
@@ -1470,7 +1480,9 @@ DOUBLE seqnum_cell_area_km (seqnum UBIGINT, res INTEGER, params STRUCT)
 
 #### Description
 
-Returns the true spherical area in km² of **one** cell, measured on the WGS84 authalic sphere. `dggs_cell_area_km` gives the grid average; individual cells differ from it, most visibly the 12 pentagons, and on non-equal-area projections such as `FULLER`. The areas of all cells at a resolution add up to the area of the sphere.
+Returns the true area in km² of **one** cell. `dggs_cell_area_km` gives the grid average; individual cells differ from it, most visibly the 12 pentagons, and on non-equal-area projections such as `FULLER`. The areas of all cells at a resolution add up to the area of the sphere.
+
+On an `AUTHALIC_SPHERE` grid (the default) the cell is measured on the WGS84 authalic sphere. On a `WGS84` grid (e.g. `dggs_preset('ISEA4HL')`) its geodetic vertices are joined by WGS84 geodesics and measured on the ellipsoid, as DGGRID 9.3 does. Because the edges follow the ellipsoid, this differs from the authalic-sphere value by up to 3e-4 for the huge resolution-0 cells, shrinking quickly with cell size (about 1e-7 at resolution 7). The cells still add up to the ellipsoid's area.
 
 #### Example
 
@@ -1481,12 +1493,12 @@ SELECT seqnum_cell_area_km(2380::UBIGINT, 5) AS hexagon,
        dggs_cell_area_km(5)                  AS average;
 ```
 ```
-┌───────────────────┬────────────────────┬───────────────────┐
-│      hexagon      │      pentagon      │      average      │
-│      double       │       double       │      double       │
-├───────────────────┼────────────────────┼───────────────────┤
-│ 49815.21462915404 │ 42984.471856754506 │ 49811.09587149303 │
-└───────────────────┴────────────────────┴───────────────────┘
+┌────────────────────┬────────────────────┬───────────────────┐
+│      hexagon       │      pentagon      │      average      │
+│       double       │       double       │      double       │
+├────────────────────┼────────────────────┼───────────────────┤
+│ 49815.214505404074 │ 42984.471872557144 │ 49811.09587149302 │
+└────────────────────┴────────────────────┴───────────────────┘
 ```
 
 ----
@@ -1652,13 +1664,12 @@ UBIGINT seqnum_index_parent (seqnum UBIGINT, res INTEGER, params STRUCT)
 
 #### Description
 
-Returns the cell's parent at resolution `res - 1` in the grid's **hierarchical indexing system**: Z3 for aperture 3, ZOrder for aperture 4 and Z7 for aperture 7 (DGGRID v9's "indexing parent"). The resolution must be > 0.
+Returns the cell's parent at resolution `res - 1` in the grid's **hierarchical indexing system** (DGGRID v9's "indexing parent"): Z3 for aperture 3 hexagons, ZORDER for aperture 4 hexagons and for diamonds, Z7 for aperture 7 hexagons and QUADTREE for triangles. The resolution must be > 0.
 
-The spatial `seqnum_parent` picks the coarser cell under the cell's centre, and a cell on a boundary can touch several (`seqnum_all_parents`). The index hierarchy is instead a strict tree: every cell has exactly one index parent, which is the parent its Z3/ZOrder/Z7 index is built from.
+The spatial `seqnum_parent` picks the coarser cell under the cell's centre, and a cell on a boundary can touch several (`seqnum_all_parents`). The index hierarchy is instead a strict tree: every cell has exactly one index parent, which is the parent its hierarchical index is built from.
 
-::: info
-Only for single-aperture `HEXAGON` grids (not aperture sequences).
-:::
+> Not available on aperture-sequence grids. Diamond and triangle grids are
+> supported from DGGRID 9.3; triangle grids only up to resolution 29.
 
 #### Example
 
@@ -1685,11 +1696,10 @@ UBIGINT[] seqnum_index_children (seqnum UBIGINT, res INTEGER, params STRUCT)
 
 #### Description
 
-Returns the cell's children at resolution `res + 1` in the grid's hierarchical indexing system (the cells whose `seqnum_index_parent` is this cell): 4 for aperture 4, 3 for aperture 3 and 7 for aperture 7. Unlike `seqnum_children`, the index children of different cells never overlap, so taking them for every cell at one resolution lists each cell of the next resolution exactly once.
+Returns the cell's children at resolution `res + 1` in the grid's hierarchical indexing system (the cells whose `seqnum_index_parent` is this cell): 4 for aperture 4 (including diamonds and triangles), 3 for aperture 3 and 7 for aperture 7. Unlike `seqnum_children`, the index children of different cells never overlap, so taking them for every cell at one resolution lists each cell of the next resolution exactly once.
 
-::: info
-Only for single-aperture `HEXAGON` grids (not aperture sequences).
-:::
+> Not available on aperture-sequence grids. Diamond and triangle grids are
+> supported from DGGRID 9.3; triangle grids only up to resolution 29.
 
 #### Example
 
@@ -1719,15 +1729,18 @@ VARCHAR seqnum_to_index_string (seqnum UBIGINT, res INTEGER, params STRUCT)
 #### Description
 
 Returns the cell's index in the text form of the grid's hierarchical indexing
-system (Z3, ZOrder or Z7): two base-cell digits followed by one digit per
-resolution, so a cell's string starts with its index parent's. Single-aperture
-`HEXAGON` grids only.
+system (Z3, ZOrder, Z7 or QUADTREE): two root digits followed by one digit per
+resolution, so a cell's string starts with its index parent's. The root is the
+base cell (`00`–`11`), or for QUADTREE the icosahedron triangle (`00`–`19`).
+Not available on aperture-sequence grids.
 
 #### Example
 
 ```sql
-SELECT seqnum_to_index_string(100::UBIGINT, 4, dggs_preset('ISEA7H'));
--- → 010041
+SELECT seqnum_to_index_string(100::UBIGINT, 4, dggs_preset('ISEA7H')) AS z7,
+       seqnum_to_index_string(100::UBIGINT, 4, dggs_preset('ISEA4D')) AS zorder,
+       seqnum_to_index_string(100::UBIGINT, 4, dggs_preset('ISEA4T')) AS quadtree;
+-- → 010041, 010231, 003303
 ```
 
 ### index_string_to_seqnum
@@ -1756,7 +1769,7 @@ SELECT index_string_to_seqnum('010041', 4, dggs_preset('ISEA7H'));
 
 ## Hierarchical Index Conversions
 
-These functions convert between the sequential cell index and alternative hierarchical indexing schemes. Z-order and Z3/Z7 indices encode spatial locality, which can be useful for range queries and spatial sorting.
+These functions convert between the sequential cell index and alternative hierarchical indexing schemes. Z-order, Z3/Z7 and QUADTREE indices encode spatial locality, which can be useful for range queries and spatial sorting.
 
 ### seqnum_to_zorder
 
@@ -1769,7 +1782,12 @@ UBIGINT seqnum_to_zorder (seqnum UBIGINT, res INTEGER, params STRUCT)
 
 #### Description
 
-Converts a sequential cell index to its Z-order (Morton code) index. Available for aperture 3 and aperture 4 grids.
+Converts a sequential cell index to its Z-order (Morton code) index. Available for aperture 3 and aperture 4 hexagon grids, and (from DGGRID 9.3) for diamond grids:
+
+```sql
+SELECT seqnum_to_zorder(100::UBIGINT, 4, dggs_preset('ISEA4D'));
+-- → 1355583487838519296
+```
 
 #### Example
 
@@ -1781,7 +1799,7 @@ SELECT seqnum_to_zorder(2380::UBIGINT, 5);
 │ seqnum_to_zorder(CAST(2380 AS "UBIGINT"), 5) │
 │                    uint64                    │
 ├──────────────────────────────────────────────┤
-│                          3688448094816436224  │
+│                          3688448094816436224 │
 └──────────────────────────────────────────────┘
 ```
 
@@ -1913,6 +1931,54 @@ SELECT z7_to_seqnum(1162491653815009279::UBIGINT, 4,
 
 ----
 
+### seqnum_to_quadtree
+
+#### Signatures
+
+```sql
+UBIGINT seqnum_to_quadtree (seqnum UBIGINT, res INTEGER)
+UBIGINT seqnum_to_quadtree (seqnum UBIGINT, res INTEGER, params STRUCT)
+```
+
+#### Description
+
+Converts a sequential cell index to its QUADTREE hierarchical index (added in
+DGGRID 9.3). Only available for aperture 4 `TRIANGLE` grids at resolutions
+0–29. The root icosahedron triangle (0–19) is in bits 63–59, followed by two
+bits per resolution, coarsest first (`0` centre child, `1` apex child, `2` and
+`3` the other corners); unused low bits are zero.
+
+#### Example
+
+```sql
+SELECT seqnum_to_quadtree(100::UBIGINT, 4, dggs_preset('ISEA4T'));
+-- → 547187354725515264
+```
+
+----
+
+### quadtree_to_seqnum
+
+#### Signatures
+
+```sql
+UBIGINT quadtree_to_seqnum (quadtree UBIGINT, res INTEGER)
+UBIGINT quadtree_to_seqnum (quadtree UBIGINT, res INTEGER, params STRUCT)
+```
+
+#### Description
+
+Converts a QUADTREE index back to a sequential cell index.
+
+#### Example
+
+```sql
+SELECT quadtree_to_seqnum(547187354725515264::UBIGINT, 4, dggs_preset('ISEA4T'));
+-- → 100
+```
+
+----
+
 ## Coverage & Geodesy
 
 ### polygon_to_seqnums
@@ -1962,11 +2028,12 @@ FROM (SELECT unnest(polygon_to_seqnums(
 
 ```sql
 DOUBLE geo_distance_km (a GEOMETRY, b GEOMETRY)
+DOUBLE geo_distance_km (a GEOMETRY, b GEOMETRY, datum VARCHAR)
 ```
 
 #### Description
 
-Returns the great-circle distance in km between two `POINT` geometries (`x` = longitude, `y` = latitude), on the WGS84 authalic sphere (radius 6371.007 km) that DGGRID uses for its grids.
+Returns the distance in km between two `POINT` geometries (`x` = longitude, `y` = latitude). Without `datum`, or with `'AUTHALIC_SPHERE'`, it is the great-circle distance on the WGS84 authalic sphere (radius 6371.007 km) that DGGRID uses for its grids. With `'WGS84'` it is the shortest geodesic on the WGS84 ellipsoid between geodetic coordinates (DGGRID 9.3's `DgGeodesic`), which agrees with GeographicLib to well under a millimetre.
 
 #### Example
 
@@ -1979,8 +2046,14 @@ SELECT geo_distance_km('POINT(-75.7 45.4)'::GEOMETRY, 'POINT(-0.1 51.5)'::GEOMET
 │ geo_distance_km(CAST('POINT(-75.7 45.4)' AS GEOMETRY), CAST('POINT(-0.1 51.5)' AS GEOMETRY)) │
 │                                            double                                            │
 ├──────────────────────────────────────────────────────────────────────────────────────────────┤
-│                                                                            5364.664130066861 │
+│                                                                             5364.66413006686 │
 └──────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+```sql
+-- the same pair on the WGS84 ellipsoid
+SELECT geo_distance_km('POINT(-75.7 45.4)'::GEOMETRY, 'POINT(-0.1 51.5)'::GEOMETRY, 'WGS84');
+-- → 5380.440419540828
 ```
 
 ### geo_azimuth_deg
@@ -1989,11 +2062,12 @@ SELECT geo_distance_km('POINT(-75.7 45.4)'::GEOMETRY, 'POINT(-0.1 51.5)'::GEOMET
 
 ```sql
 DOUBLE geo_azimuth_deg (a GEOMETRY, b GEOMETRY)
+DOUBLE geo_azimuth_deg (a GEOMETRY, b GEOMETRY, datum VARCHAR)
 ```
 
 #### Description
 
-Returns the initial great-circle bearing from point `a` to point `b`, in degrees clockwise from north in `[0, 360)` (0 = north, 90 = east).
+Returns the initial bearing from point `a` to point `b`, in degrees clockwise from north in `[0, 360)` (0 = north, 90 = east): along a great circle of the authalic sphere by default, or along the WGS84 geodesic with `datum = 'WGS84'`. For two points almost exactly opposite each other on the equator, a north-going and a south-going geodesic are equally short, so the bearing is one of two valid values.
 
 #### Example
 
@@ -2007,6 +2081,40 @@ SELECT geo_azimuth_deg('POINT(-75.7 45.4)'::GEOMETRY, 'POINT(-0.1 51.5)'::GEOMET
 ├──────────────────────────────────────────────────────────────────────────────────────────────┤
 │                                                                            53.92508306310388 │
 └──────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+```sql
+SELECT geo_azimuth_deg('POINT(-75.7 45.4)'::GEOMETRY, 'POINT(-0.1 51.5)'::GEOMETRY, 'WGS84');
+-- → 53.93869311211036
+```
+
+### geo_destination
+
+#### Signatures
+
+```sql
+GEOMETRY geo_destination (origin GEOMETRY, azimuth_deg DOUBLE, distance_km DOUBLE)
+GEOMETRY geo_destination (origin GEOMETRY, azimuth_deg DOUBLE, distance_km DOUBLE, datum VARCHAR)
+```
+
+#### Description
+
+Returns the `POINT` reached by travelling `distance_km` from `origin` along the initial bearing `azimuth_deg` (degrees clockwise from north): the direct geodesic problem, the inverse of `geo_distance_km` + `geo_azimuth_deg`. It follows a great circle of the authalic sphere by default, or the WGS84 geodesic with `datum = 'WGS84'`. A negative distance travels the opposite way; the returned longitude is in `[-180, 180]`.
+
+#### Example
+
+```sql
+-- 5000 km from Ottawa, heading north-east
+SELECT geo_destination('POINT(-75.7 45.4)'::GEOMETRY, 54.0, 5000.0)          AS sphere,
+       geo_destination('POINT(-75.7 45.4)'::GEOMETRY, 54.0, 5000.0, 'WGS84') AS wgs84;
+```
+```
+┌───────────────────────────────────────────────┬────────────────────────────────────────────┐
+│                    sphere                     │                   wgs84                    │
+│                   geometry                    │                  geometry                  │
+├───────────────────────────────────────────────┼────────────────────────────────────────────┤
+│ POINT (-5.072769007078589 52.696599311175746) │ POINT (-5.269411830339384 52.755536366808) │
+└───────────────────────────────────────────────┴────────────────────────────────────────────┘
 ```
 
 ----

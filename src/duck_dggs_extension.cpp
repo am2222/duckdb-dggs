@@ -1419,6 +1419,52 @@ static void ZOrderToSeqNumParamsFun(DataChunk &args, ExpressionState &,
   }
 }
 
+// ── QUADTREE ────────────────────────────────────────────────────────────────
+
+static void SeqNumToQuadtreeFun(DataChunk &args, ExpressionState &,
+                                Vector &result) {
+  BinaryExecutor::Execute<uint64_t, int32_t, uint64_t>(
+      args.data[0], args.data[1], result, args.size(),
+      [](uint64_t seqnum, int32_t res) {
+        return dggrid::seqNumToQuadtree(paramsWithRes(res), seqnum).value;
+      });
+}
+static void SeqNumToQuadtreeParamsFun(DataChunk &args, ExpressionState &,
+                                      Vector &result) {
+  idx_t n = args.size();
+  ArgReader<uint64_t> seqnum(args, 0, n);
+  ArgReader<int32_t> res(args, 1, n);
+  ParamsReader params(args.data[2], n);
+  auto *out = FlatVector::GetDataMutable<uint64_t>(result);
+  for (idx_t i = 0; i < n; i++) {
+    auto p = params[i];
+    p.res = res[i];
+    out[i] = dggrid::seqNumToQuadtree(p, seqnum[i]).value;
+  }
+}
+
+static void QuadtreeToSeqNumFun(DataChunk &args, ExpressionState &,
+                                Vector &result) {
+  BinaryExecutor::Execute<uint64_t, int32_t, uint64_t>(
+      args.data[0], args.data[1], result, args.size(),
+      [](uint64_t value, int32_t res) {
+        return dggrid::quadtreeToSeqNum(paramsWithRes(res), value);
+      });
+}
+static void QuadtreeToSeqNumParamsFun(DataChunk &args, ExpressionState &,
+                                      Vector &result) {
+  idx_t n = args.size();
+  ArgReader<uint64_t> value(args, 0, n);
+  ArgReader<int32_t> res(args, 1, n);
+  ParamsReader params(args.data[2], n);
+  auto *out = FlatVector::GetDataMutable<uint64_t>(result);
+  for (idx_t i = 0; i < n; i++) {
+    auto p = params[i];
+    p.res = res[i];
+    out[i] = dggrid::quadtreeToSeqNum(p, value[i]);
+  }
+}
+
 // ── Z3 ──────────────────────────────────────────────────────────────────────
 
 static void SeqNumToZ3Fun(DataChunk &args, ExpressionState &, Vector &result) {
@@ -1774,6 +1820,70 @@ static void GeoAzimuthDegFun(DataChunk &args, ExpressionState &,
       });
 }
 
+// (a GEOMETRY, b GEOMETRY, datum VARCHAR) → DOUBLE
+static void GeoDistanceKMDatumFun(DataChunk &args, ExpressionState &,
+                                  Vector &result) {
+  TernaryExecutor::Execute<string_t, string_t, string_t, double>(
+      args.data[0], args.data[1], args.data[2], result, args.size(),
+      [](string_t a, string_t b, string_t datum) {
+        double lon1, lat1, lon2, lat2;
+        ReadPointXY(a, lon1, lat1);
+        ReadPointXY(b, lon2, lat2);
+        return dggrid::geoDistanceKM(lon1, lat1, lon2, lat2, datum.GetString());
+      });
+}
+
+static void GeoAzimuthDegDatumFun(DataChunk &args, ExpressionState &,
+                                  Vector &result) {
+  TernaryExecutor::Execute<string_t, string_t, string_t, double>(
+      args.data[0], args.data[1], args.data[2], result, args.size(),
+      [](string_t a, string_t b, string_t datum) {
+        double lon1, lat1, lon2, lat2;
+        ReadPointXY(a, lon1, lat1);
+        ReadPointXY(b, lon2, lat2);
+        return dggrid::geoAzimuthDeg(lon1, lat1, lon2, lat2, datum.GetString());
+      });
+}
+
+// (origin GEOMETRY, azimuth_deg DOUBLE, distance_km DOUBLE [, datum VARCHAR])
+//   → GEOMETRY
+template <bool DATUM>
+static void GeoDestinationFun(DataChunk &args, ExpressionState &,
+                              Vector &result) {
+  const idx_t n = args.size();
+  UnifiedVectorFormat fmt[4];
+  const idx_t ncols = DATUM ? 4 : 3;
+  for (idx_t c = 0; c < ncols; c++)
+    args.data[c].ToUnifiedFormat(n, fmt[c]);
+  auto origin = UnifiedVectorFormat::GetData<string_t>(fmt[0]);
+  auto az = UnifiedVectorFormat::GetData<double>(fmt[1]);
+  auto dist = UnifiedVectorFormat::GetData<double>(fmt[2]);
+  const string_t *datum =
+      DATUM ? UnifiedVectorFormat::GetData<string_t>(fmt[3]) : nullptr;
+
+  result.SetVectorType(VectorType::FLAT_VECTOR);
+  for (idx_t i = 0; i < n; i++) {
+    idx_t idx[4];
+    bool valid = true;
+    for (idx_t c = 0; c < ncols; c++) {
+      idx[c] = fmt[c].sel->get_index(i);
+      valid = valid && fmt[c].validity.RowIsValid(idx[c]);
+    }
+    if (!valid) {
+      FlatVector::SetNull(result, i, true);
+      continue;
+    }
+    double lon, lat;
+    ReadPointXY(origin[idx[0]], lon, lat);
+    WriteGeo(result, i,
+             dggrid::geoDestination(lon, lat, az[idx[1]], dist[idx[2]],
+                                    DATUM ? datum[idx[3]].GetString()
+                                          : "AUTHALIC_SPHERE"));
+  }
+  if (n == 1 && args.AllConstant())
+    result.SetVectorType(VectorType::CONSTANT_VECTOR);
+}
+
 // ===========================================================================
 // POLYGON COVERAGE  (geom GEOMETRY, res INTEGER [, params])  → UBIGINT[]
 // ===========================================================================
@@ -1922,6 +2032,8 @@ static constexpr const char *ISEA3H =
     "dggs_params('ISEA', 3, 'HEXAGON', 0.0, 58.28252559, 11.25)";
 static constexpr const char *ISEA7H =
     "dggs_params('ISEA', 7, 'HEXAGON', 0.0, 58.28252559, 11.25)";
+static constexpr const char *ISEA4T =
+    "dggs_params('ISEA', 4, 'TRIANGLE', 0.0, 58.28252559, 11.25)";
 
 // Documentation for one transform function. Every transform is registered as
 // a pair of overloads — the base signature, and the same signature with a
@@ -2057,7 +2169,8 @@ static void LoadInternal(ExtensionLoader &loader) {
         "Returns the grid-configuration struct of one of DGGRID's named "
         "dggs_type presets: IGEO7v1, IGEO7v2 (alias IGEO7), or "
         "<ISEA|IVEA|FULLER><3H|4H|7H|4T|4D> with an optional S (authalic "
-        "sphere) or L (WGS84 ellipsoid) suffix, e.g. 'ISEA4H', 'IVEA7HL'.";
+        "sphere) or L (WGS84 ellipsoid) suffix and an optional index suffix "
+        "Z or Q, e.g. 'ISEA4H', 'IVEA7HL', 'ISEA4TSQ'.";
     desc.examples = {"dggs_preset('IGEO7v2')"};
     desc.categories = {"dggs", "configuration"};
     info.descriptions.push_back(std::move(desc));
@@ -2442,15 +2555,32 @@ static void LoadInternal(ExtensionLoader &loader) {
       SeqNumToZOrderParamsFun,
       {SEQ_RES, SEQ_EX,
        "Converts a sequential cell index to its Z-order (Morton code) index, "
-       "which preserves spatial locality; aperture 3 and 4 grids only.",
+       "which preserves spatial locality; aperture 3 and 4 hexagon grids and "
+       "diamond grids only.",
        HIER});
   reg("zorder_to_seqnum", {UB, I}, UB, ZOrderToSeqNumFun,
       ZOrderToSeqNumParamsFun,
       {{"zorder", "res"},
        "3688448094816436224::UBIGINT, 5",
        "Converts a Z-order (Morton code) index back to a sequential cell "
-       "index; aperture 3 and 4 grids only.",
+       "index; aperture 3 and 4 hexagon grids and diamond grids only.",
        HIER});
+  reg("seqnum_to_quadtree", {UB, I}, UB, SeqNumToQuadtreeFun,
+      SeqNumToQuadtreeParamsFun,
+      {SEQ_RES, "100::UBIGINT, 4",
+       "Converts a sequential cell index to its QUADTREE hierarchical index: "
+       "the root icosahedron triangle (0-19) in the top 5 bits, then two "
+       "bits per resolution; aperture 4 triangle grids at resolution 0-29 "
+       "only.",
+       HIER, ISEA4T});
+  reg("quadtree_to_seqnum", {UB, I}, UB, QuadtreeToSeqNumFun,
+      QuadtreeToSeqNumParamsFun,
+      {{"quadtree", "res"},
+       "547187354725515264::UBIGINT, 4",
+       "Converts a QUADTREE hierarchical index back to a sequential cell "
+       "index; aperture 4 triangle grids at resolution 0-29 only.",
+       HIER,
+       ISEA4T});
   reg("seqnum_to_z3", {UB, I}, UB, SeqNumToZ3Fun, SeqNumToZ3ParamsFun,
       {SEQ_RES, "100::UBIGINT, 4",
        "Converts a sequential cell index to its Z3 hierarchical index; "
@@ -2482,34 +2612,37 @@ static void LoadInternal(ExtensionLoader &loader) {
       {SEQ_RES, SEQ_EX,
        "Returns the sequential index of the cell's parent at resolution "
        "res - 1 in the grid's hierarchical indexing system (Z3 for aperture "
-       "3, ZOrder for 4, Z7 for 7). Every cell has exactly one index parent, "
-       "even where it straddles several spatial parents; single-aperture "
-       "hexagon grids only.",
+       "3 hexagons, ZOrder for aperture 4 hexagons and diamonds, Z7 for "
+       "aperture 7 hexagons, QUADTREE for triangles). Every cell has exactly "
+       "one index parent, even where it straddles several spatial parents; "
+       "not available on aperture-sequence grids.",
        HIER});
   reg("seqnum_index_children", {UB, I}, LIST_UB, SeqNumIndexChildrenFun<false>,
       SeqNumIndexChildrenFun<true>,
       {SEQ_RES, "599::UBIGINT, 4",
        "Returns the sequential indices of the cell's children at resolution "
-       "res + 1 in the grid's hierarchical indexing system (Z3, ZOrder or "
-       "Z7). Unlike seqnum_children, the index children of different cells "
-       "never overlap; single-aperture hexagon grids only.",
+       "res + 1 in the grid's hierarchical indexing system (Z3, ZOrder, Z7 "
+       "or QUADTREE). Unlike seqnum_children, the index children of "
+       "different cells never overlap; not available on aperture-sequence "
+       "grids.",
        HIER});
 
   reg("seqnum_to_index_string", {UB, I}, LogicalType::VARCHAR,
       SeqNumToIndexStringFun<false>, SeqNumToIndexStringFun<true>,
       {SEQ_RES, "100::UBIGINT, 4",
        "Returns the cell's index in the text form of the grid's hierarchical "
-       "indexing system (Z3, ZOrder or Z7): two base-cell digits followed by "
-       "one digit per resolution, so a parent's string is a prefix of its "
-       "children's; single-aperture hexagon grids only.",
+       "indexing system (Z3, ZOrder, Z7 or QUADTREE): two base-cell (or, "
+       "for QUADTREE, root-triangle) digits followed by one digit per "
+       "resolution, so a parent's string is a prefix of its children's; not "
+       "available on aperture-sequence grids.",
        HIER, ISEA7H});
   reg("index_string_to_seqnum", {LogicalType::VARCHAR, I}, UB,
       IndexStringToSeqNumFun<false>, IndexStringToSeqNumFun<true>,
       {{"index", "res"},
        "'010041', 4",
        "Converts an index in the text form of the grid's hierarchical "
-       "indexing system (Z3, ZOrder or Z7) back to a sequential cell index; "
-       "single-aperture hexagon grids only.",
+       "indexing system (Z3, ZOrder, Z7 or QUADTREE) back to a sequential "
+       "cell index; not available on aperture-sequence grids.",
        HIER,
        ISEA7H});
 
@@ -2527,9 +2660,10 @@ static void LoadInternal(ExtensionLoader &loader) {
   reg("seqnum_cell_area_km", {UB, I}, D, SeqNumCellAreaKMFun<false>,
       SeqNumCellAreaKMFun<true>,
       {SEQ_RES, SEQ_EX,
-       "Returns the true spherical area in km² of one cell, on the WGS84 "
-       "authalic sphere. Unlike dggs_cell_area_km, which is the grid "
-       "average, this differs between cells (pentagons are smaller).",
+       "Returns the true area in km² of one cell: on the authalic sphere, "
+       "or, for a grid with datum WGS84, with geodesic edges on the WGS84 "
+       "ellipsoid. Unlike dggs_cell_area_km, which is the grid average, "
+       "this differs between cells (pentagons are smaller).",
        STATS});
 
   // ── POLYGON COVERAGE ──────────────────────────────────────────────────────
@@ -2544,29 +2678,70 @@ static void LoadInternal(ExtensionLoader &loader) {
        {"dggs", "coverage"}});
 
   // ── GEODESY (grid independent) ────────────────────────────────────────────
-  auto reg_geodesy = [&](const char *name, scalar_function_t fn,
-                         const char *description) {
-    const vector<string> names = {"a", "b"};
-    CreateScalarFunctionInfo info(WithParameterNames(
-        ScalarFunction(name, {GEO, GEO}, D, std::move(fn)), names));
+  const auto VC = LogicalType::VARCHAR;
+  // Registers fn(args...) and fn(args..., datum VARCHAR).
+  auto reg_geodesy = [&](const char *name, vector<LogicalType> args,
+                         vector<string> names, const LogicalType &ret,
+                         scalar_function_t fn, scalar_function_t datum_fn,
+                         const string &example_args, const char *description,
+                         const char *datum_description) {
+    vector<LogicalType> datum_args = args;
+    datum_args.push_back(VC);
+    vector<string> datum_names = names;
+    datum_names.push_back("datum");
+
+    ScalarFunctionSet set(name);
+    set.AddFunction(Fallible(WithParameterNames(
+        ScalarFunction(name, args, ret, std::move(fn)), names)));
+    set.AddFunction(Fallible(WithParameterNames(
+        ScalarFunction(name, datum_args, ret, std::move(datum_fn)),
+        datum_names)));
+    CreateScalarFunctionInfo info(std::move(set));
     info.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
+
     FunctionDescription desc;
-    desc.parameter_types = {GEO, GEO};
-    desc.parameter_names = names;
+    desc.parameter_types = std::move(args);
+    desc.parameter_names = std::move(names);
     desc.description = description;
-    desc.examples = {string(name) + "('POINT(-75.7 45.4)'::GEOMETRY, "
-                                    "'POINT(-0.1 51.5)'::GEOMETRY)"};
+    desc.examples = {string(name) + "(" + example_args + ")"};
     desc.categories = {"dggs", "geodesy"};
+    FunctionDescription datum_desc = desc;
+    datum_desc.parameter_types = std::move(datum_args);
+    datum_desc.parameter_names = std::move(datum_names);
+    datum_desc.description = datum_description;
+    datum_desc.examples = {string(name) + "(" + example_args + ", 'WGS84')"};
     info.descriptions.push_back(std::move(desc));
+    info.descriptions.push_back(std::move(datum_desc));
     loader.RegisterFunction(std::move(info));
   };
-  reg_geodesy("geo_distance_km", GeoDistanceKMFun,
+  const char *const AB_EX =
+      "'POINT(-75.7 45.4)'::GEOMETRY, 'POINT(-0.1 51.5)'::GEOMETRY";
+  reg_geodesy("geo_distance_km", {GEO, GEO}, {"a", "b"}, D, GeoDistanceKMFun,
+              GeoDistanceKMDatumFun, AB_EX,
               "Returns the great-circle distance in km between two POINT "
               "geometries (x = longitude, y = latitude), on the WGS84 "
-              "authalic sphere DGGRID uses.");
-  reg_geodesy("geo_azimuth_deg", GeoAzimuthDegFun,
+              "authalic sphere DGGRID uses.",
+              "Returns the distance in km between two POINT geometries on "
+              "a datum: 'AUTHALIC_SPHERE' (great circle, as without datum) "
+              "or 'WGS84' (ellipsoidal geodesic between geodetic "
+              "coordinates).");
+  reg_geodesy("geo_azimuth_deg", {GEO, GEO}, {"a", "b"}, D, GeoAzimuthDegFun,
+              GeoAzimuthDegDatumFun, AB_EX,
               "Returns the initial great-circle bearing from point a to "
-              "point b, in degrees clockwise from north in [0, 360).");
+              "point b, in degrees clockwise from north in [0, 360).",
+              "Returns the initial bearing from point a to point b on a "
+              "datum ('AUTHALIC_SPHERE' or 'WGS84'), in degrees clockwise "
+              "from north in [0, 360).");
+  reg_geodesy("geo_destination", {GEO, D, D},
+              {"origin", "azimuth_deg", "distance_km"}, GEO,
+              GeoDestinationFun<false>, GeoDestinationFun<true>,
+              "'POINT(-75.7 45.4)'::GEOMETRY, 54.0, 5000.0",
+              "Returns the POINT reached by travelling distance_km from "
+              "origin along the initial bearing azimuth_deg (clockwise from "
+              "north), along a great circle of the WGS84 authalic sphere.",
+              "Returns the POINT reached by travelling distance_km from "
+              "origin along the initial bearing azimuth_deg, along a "
+              "geodesic of the datum ('AUTHALIC_SPHERE' or 'WGS84').");
 
   // ── IGEO7 / Z7 bit-level index manipulation ──────────────────────────────
   RegisterIGeo7Functions(loader);
