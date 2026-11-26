@@ -63,7 +63,7 @@ Notes:
 ## DuckDB version
 
 The extension targets DuckDB v2.0 only: the `duckdb` submodule and the release
-build pin `v2.0.0`, the version duckdb/community-extensions builds against.
+build pin `v2.0.1`, the version duckdb/community-extensions builds against.
 Support for the v1.5 line has been dropped, so code calls the v2 vector API
 directly (`FlatVector::GetDataMutable`, `ListVector::GetChildMutable`,
 `Vector::ToUnifiedFormat(format)`, ...). The few registration helpers live in
