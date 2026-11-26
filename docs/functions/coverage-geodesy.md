@@ -47,11 +47,15 @@ FROM (SELECT unnest(polygon_to_seqnums(
 
 ```sql
 DOUBLE geo_distance_km (a GEOMETRY, b GEOMETRY)
+DOUBLE geo_distance_km (a GEOMETRY, b GEOMETRY, datum VARCHAR)
 ```
 
 ### Description
 
-Returns the great-circle distance in km between two `POINT` geometries (`x` = longitude, `y` = latitude), on the WGS84 authalic sphere (radius 6371.007 km) that DGGRID uses for its grids.
+Returns the distance in km between two `POINT` geometries (`x` = longitude, `y` = latitude).
+
+- Without `datum`, or with `'AUTHALIC_SPHERE'`: the great-circle distance on the WGS84 authalic sphere (radius 6371.007 km) that DGGRID uses for its grids.
+- With `'WGS84'`: the shortest geodesic on the WGS84 ellipsoid between geodetic coordinates (DGGRID 9.3's `DgGeodesic`). It agrees with GeographicLib to well under a millimetre, including nearly antipodal points.
 
 ### Example
 
@@ -64,8 +68,14 @@ SELECT geo_distance_km('POINT(-75.7 45.4)'::GEOMETRY, 'POINT(-0.1 51.5)'::GEOMET
 │ geo_distance_km(CAST('POINT(-75.7 45.4)' AS GEOMETRY), CAST('POINT(-0.1 51.5)' AS GEOMETRY)) │
 │                                            double                                            │
 ├──────────────────────────────────────────────────────────────────────────────────────────────┤
-│                                                                            5364.664130066861 │
+│                                                                             5364.66413006686 │
 └──────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+```sql
+-- the same pair on the WGS84 ellipsoid
+SELECT geo_distance_km('POINT(-75.7 45.4)'::GEOMETRY, 'POINT(-0.1 51.5)'::GEOMETRY, 'WGS84');
+-- → 5380.440419540828
 ```
 
 ## geo_azimuth_deg
@@ -74,11 +84,16 @@ SELECT geo_distance_km('POINT(-75.7 45.4)'::GEOMETRY, 'POINT(-0.1 51.5)'::GEOMET
 
 ```sql
 DOUBLE geo_azimuth_deg (a GEOMETRY, b GEOMETRY)
+DOUBLE geo_azimuth_deg (a GEOMETRY, b GEOMETRY, datum VARCHAR)
 ```
 
 ### Description
 
-Returns the initial great-circle bearing from point `a` to point `b`, in degrees clockwise from north in `[0, 360)` (0 = north, 90 = east).
+Returns the initial bearing from point `a` to point `b`, in degrees clockwise from north in `[0, 360)` (0 = north, 90 = east): along a great circle of the authalic sphere by default, or along the WGS84 geodesic with `datum = 'WGS84'`.
+
+::: tip
+For two points almost exactly opposite each other on the equator, a north-going and a south-going geodesic are equally short, so the bearing is one of two valid values (`α` or `180° − α`).
+:::
 
 ### Example
 
@@ -92,4 +107,48 @@ SELECT geo_azimuth_deg('POINT(-75.7 45.4)'::GEOMETRY, 'POINT(-0.1 51.5)'::GEOMET
 ├──────────────────────────────────────────────────────────────────────────────────────────────┤
 │                                                                            53.92508306310388 │
 └──────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+```sql
+SELECT geo_azimuth_deg('POINT(-75.7 45.4)'::GEOMETRY, 'POINT(-0.1 51.5)'::GEOMETRY, 'WGS84');
+-- → 53.93869311211036
+```
+
+## geo_destination
+
+### Signatures
+
+```sql
+GEOMETRY geo_destination (origin GEOMETRY, azimuth_deg DOUBLE, distance_km DOUBLE)
+GEOMETRY geo_destination (origin GEOMETRY, azimuth_deg DOUBLE, distance_km DOUBLE, datum VARCHAR)
+```
+
+### Description
+
+Returns the `POINT` reached by travelling `distance_km` from `origin` along the initial bearing `azimuth_deg` (degrees clockwise from north). This is the direct geodesic problem, the inverse of `geo_distance_km` + `geo_azimuth_deg`. It follows a great circle of the authalic sphere by default, or the WGS84 geodesic with `datum = 'WGS84'`. A negative distance travels the opposite way, and the returned longitude is in `[-180, 180]`.
+
+### Example
+
+```sql
+-- 5000 km from Ottawa, heading north-east
+SELECT geo_destination('POINT(-75.7 45.4)'::GEOMETRY, 54.0, 5000.0)          AS sphere,
+       geo_destination('POINT(-75.7 45.4)'::GEOMETRY, 54.0, 5000.0, 'WGS84') AS wgs84;
+```
+```
+┌───────────────────────────────────────────────┬────────────────────────────────────────────┐
+│                    sphere                     │                   wgs84                    │
+│                   geometry                    │                  geometry                  │
+├───────────────────────────────────────────────┼────────────────────────────────────────────┤
+│ POINT (-5.072769007078589 52.696599311175746) │ POINT (-5.269411830339384 52.755536366808) │
+└───────────────────────────────────────────────┴────────────────────────────────────────────┘
+```
+
+Round trip: going from `a` toward `b` for their distance lands on `b`.
+
+```sql
+WITH p AS (SELECT 'POINT(-75.7 45.4)'::GEOMETRY a, 'POINT(-0.1 51.5)'::GEOMETRY b)
+SELECT geo_destination(a, geo_azimuth_deg(a, b, 'WGS84'),
+                          geo_distance_km(a, b, 'WGS84'), 'WGS84')
+FROM p;
+-- → POINT (-0.10000000000000595 51.50000000000001)
 ```

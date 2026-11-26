@@ -139,12 +139,12 @@ UBIGINT seqnum_index_parent (seqnum UBIGINT, res INTEGER, params STRUCT)
 
 ### Description
 
-Returns the cell's parent at resolution `res - 1` in the grid's **hierarchical indexing system**: Z3 for aperture 3, ZOrder for aperture 4 and Z7 for aperture 7 (DGGRID v9's "indexing parent"). The resolution must be > 0.
+Returns the cell's parent at resolution `res - 1` in the grid's **hierarchical indexing system** (DGGRID v9's "indexing parent"): Z3 for aperture 3 hexagons, ZORDER for aperture 4 hexagons and for diamonds, Z7 for aperture 7 hexagons and QUADTREE for triangles. The resolution must be > 0.
 
-The spatial `seqnum_parent` picks the coarser cell under the cell's centre, and a cell on a boundary can touch several (`seqnum_all_parents`). The index hierarchy is instead a strict tree: every cell has exactly one index parent, which is the parent its Z3/ZOrder/Z7 index is built from.
+The spatial `seqnum_parent` picks the coarser cell under the cell's centre, and a cell on a boundary can touch several (`seqnum_all_parents`). The index hierarchy is instead a strict tree: every cell has exactly one index parent, which is the parent its hierarchical index is built from.
 
 ::: info
-Only for single-aperture `HEXAGON` grids (not aperture sequences).
+Not available on aperture-sequence grids. Diamond and triangle grids are supported from DGGRID 9.3; triangle grids only up to resolution 29.
 :::
 
 ### Example
@@ -172,10 +172,10 @@ UBIGINT[] seqnum_index_children (seqnum UBIGINT, res INTEGER, params STRUCT)
 
 ### Description
 
-Returns the cell's children at resolution `res + 1` in the grid's hierarchical indexing system (the cells whose `seqnum_index_parent` is this cell): 4 for aperture 4, 3 for aperture 3 and 7 for aperture 7. Unlike `seqnum_children`, the index children of different cells never overlap, so taking them for every cell at one resolution lists each cell of the next resolution exactly once.
+Returns the cell's children at resolution `res + 1` in the grid's hierarchical indexing system (the cells whose `seqnum_index_parent` is this cell): 4 for aperture 4 (including diamonds and triangles), 3 for aperture 3 and 7 for aperture 7. Unlike `seqnum_children`, the index children of different cells never overlap, so taking them for every cell at one resolution lists each cell of the next resolution exactly once.
 
 ::: info
-Only for single-aperture `HEXAGON` grids (not aperture sequences).
+Not available on aperture-sequence grids. Diamond and triangle grids are supported from DGGRID 9.3; triangle grids only up to resolution 29.
 :::
 
 ### Example
@@ -192,4 +192,11 @@ SELECT seqnum_index_children(599::UBIGINT, 4) AS index_children,
 ├──────────────────────────┼────────────────────────────────────────────┤
 │ [2380, 2381, 2412, 2413] │ [2380, 2412, 2413, 2381, 2348, 2347, 2379] │
 └──────────────────────────┴────────────────────────────────────────────┘
+```
+
+On a triangle grid the QUADTREE children are the same 4 triangles as the spatial children:
+
+```sql
+SELECT seqnum_index_children(100::UBIGINT, 4, dggs_preset('ISEA4T'));
+-- → [390, 391, 392, 456]
 ```

@@ -150,7 +150,10 @@ DOUBLE seqnum_cell_area_km (seqnum UBIGINT, res INTEGER, params STRUCT)
 
 ### Description
 
-Returns the true spherical area in km² of **one** cell, measured on the WGS84 authalic sphere. `dggs_cell_area_km` gives the grid average; individual cells differ from it, most visibly the 12 pentagons, and on non-equal-area projections such as `FULLER`. The areas of all cells at a resolution add up to the area of the sphere.
+Returns the true area in km² of **one** cell. `dggs_cell_area_km` gives the grid average; individual cells differ from it, most visibly the 12 pentagons, and on non-equal-area projections such as `FULLER`. The areas of all cells at a resolution add up to the area of the sphere.
+
+- On an `AUTHALIC_SPHERE` grid (the default) the cell is measured on the WGS84 authalic sphere.
+- On a `WGS84` grid (e.g. `dggs_preset('ISEA4HL')`) its geodetic vertices are joined by WGS84 geodesics and measured on the ellipsoid, as DGGRID 9.3 does. Because the edges follow the ellipsoid, this differs from the authalic-sphere value by up to 3e-4 for the huge resolution-0 cells, shrinking quickly with cell size (about 1e-7 at resolution 7). The cells still add up to the ellipsoid's area.
 
 ### Example
 
@@ -161,10 +164,10 @@ SELECT seqnum_cell_area_km(2380::UBIGINT, 5) AS hexagon,
        dggs_cell_area_km(5)                  AS average;
 ```
 ```
-┌───────────────────┬────────────────────┬───────────────────┐
-│      hexagon      │      pentagon      │      average      │
-│      double       │       double       │      double       │
-├───────────────────┼────────────────────┼───────────────────┤
-│ 49815.21450548134 │ 42984.47187249072  │ 49811.09587149302 │
-└───────────────────┴────────────────────┴───────────────────┘
+┌────────────────────┬────────────────────┬───────────────────┐
+│      hexagon       │      pentagon      │      average      │
+│       double       │       double       │      double       │
+├────────────────────┼────────────────────┼───────────────────┤
+│ 49815.214505404074 │ 42984.471872557144 │ 49811.09587149302 │
+└────────────────────┴────────────────────┴───────────────────┘
 ```
